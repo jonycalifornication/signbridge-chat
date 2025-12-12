@@ -4,131 +4,94 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Студия записи анимаций - SignBridge</title>
+    <title>Студия записи - SignBridge</title>
     <link rel="stylesheet" href="/src/studio.css">
     <script src="https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.js"></script>
 </head>
 
 <body>
     <div class="studio-wrapper">
-        <header class="studio-header">
-            <h1>🎬 Студия записи анимаций</h1>
-            <a href="/" class="back-link">← Вернуться на главную</a>
-        </header>
-
-        <div class="studio-container">
-            <!-- Панель управления -->
-            <div class="control-panel">
-                <div class="control-section">
-                    <h3>📹 Анимация</h3>
-                    <label for="animation-select">Выберите анимацию:</label>
-                    <select id="animation-select">
-                        <option value="">-- Выберите --</option>
-                        <option value="idle">Idle (покой)</option>
-                        <option value="hello">Hello (приветствие)</option>
-                    </select>
-                </div>
-
-                <div class="control-section">
-                    <h3>🎨 Фон</h3>
-                    <div class="background-options">
-                        <label class="radio-option">
-                            <input type="radio" name="background" value="green" checked>
-                            <span class="radio-label">
-                                <span class="color-preview" style="background: #00ff00;"></span>
-                                Зеленый (Chroma Key)
-                            </span>
-                        </label>
-                        <label class="radio-option">
-                            <input type="radio" name="background" value="white">
-                            <span class="radio-label">
-                                <span class="color-preview" style="background: #ffffff; border: 1px solid #ddd;"></span>
-                                Белый
-                            </span>
-                        </label>
-                        <label class="radio-option">
-                            <input type="radio" name="background" value="transparent">
-                            <span class="radio-label">
-                                <span class="color-preview transparent-preview"></span>
-                                Прозрачный
-                            </span>
-                        </label>
-                        <label class="radio-option">
-                            <input type="radio" name="background" value="custom">
-                            <span class="radio-label">
-                                <span class="color-preview" style="background: #f0f0f0;">📁</span>
-                                Свое изображение
-                            </span>
-                        </label>
-                    </div>
-
-                    <div id="custom-background-upload" class="custom-upload" style="display: none;">
-                        <input type="file" id="background-file" accept="image/*">
-                        <label for="background-file" class="file-label">
-                            📂 Выбрать изображение
-                        </label>
-                        <div id="background-preview" class="bg-preview"></div>
-                    </div>
-                </div>
-
-                <div class="control-section">
-                    <h3>📐 Разрешение</h3>
-                    <select id="resolution-select">
-                        <option value="480">480p (854×480)</option>
-                        <option value="720" selected>720p (1280×720)</option>
-                        <option value="1080">1080p (1920×1080)</option>
-                    </select>
-                </div>
-
-                <div class="control-section">
-                    <h3>💾 Действия</h3>
-                    <button id="record-btn" class="btn btn-primary" disabled>
-                        ⏺️ Записать анимацию
-                    </button>
-
-                    <div class="download-buttons" style="display: none;">
-                        <button id="download-webm-btn" class="btn btn-success">
-                            ⬇️ Скачать WebM
-                        </button>
-                        <button id="download-gif-btn" class="btn btn-success">
-                            ⬇️ Скачать GIF
-                        </button>
-                    </div>
-
-                    <div id="progress-container" class="progress-container" style="display: none;">
-                        <div class="progress-label">Запись...</div>
-                        <div class="progress-bar">
-                            <div id="progress-fill" class="progress-fill"></div>
-                        </div>
-                        <div id="progress-text" class="progress-text">0%</div>
-                    </div>
-                </div>
-
-                <div class="info-section">
-                    <h4>ℹ️ Информация</h4>
-                    <ul>
-                        <li><strong>WebM:</strong> Видео формат с поддержкой прозрачности</li>
-                        <li><strong>GIF:</strong> Анимированное изображение (меньше размер)</li>
-                        <li><strong>Chroma Key:</strong> Зеленый фон для удаления в редакторах</li>
-                    </ul>
-                </div>
+        <!-- Компактная панель управления в одну строку -->
+        <div class="compact-toolbar">
+            <!-- Фоны - квадратики -->
+            <div class="bg-selector">
+                <button class="bg-btn active" data-bg="green" title="Зеленый (Chroma Key)"
+                    style="background: #00ff00;"></button>
+                <button class="bg-btn" data-bg="white" title="Белый"
+                    style="background: #ffffff; border: 1px solid #ddd;"></button>
+                <button class="bg-btn transparent-bg" data-bg="transparent" title="Прозрачный"></button>
+                <button class="bg-btn" data-bg="custom" title="Свое изображение"
+                    style="background: #f0f0f0;">📁</button>
+                <input type="file" id="bg-file" accept="image/*" style="display: none;">
             </div>
 
-            <!-- Панель превью -->
-            <div class="preview-panel">
-                <div class="preview-header">
-                    <h3>👁️ Превью</h3>
-                    <div class="preview-info">
-                        <span id="preview-status">Выберите анимацию</span>
-                    </div>
-                </div>
-                <div id="studio-avatar-container" class="avatar-container"></div>
-                <div class="preview-controls">
-                    <button id="play-preview-btn" class="btn btn-secondary" disabled>
-                        ▶️ Предпросмотр
-                    </button>
+            <div class="toolbar-divider"></div>
+
+            <!-- Выбор аватара -->
+            <select id="avatar-select" class="format-select">
+                <option value="Ainaz">Ainaz</option>
+                <option value="Aibek" selected>Aibek</option>
+            </select>
+
+            <div class="toolbar-divider"></div>
+
+            <!-- Формат видео -->
+            <select id="video-format" class="format-select">
+                <option value="webm">WebM</option>
+                <option value="mp4">MP4 (в разработке)</option>
+                <option value="gif">GIF</option>
+            </select>
+
+            <!-- Качество -->
+            <select id="quality-select" class="format-select">
+                <option value="1080">1080p</option>
+                <option value="720" selected>720p</option>
+                <option value="480">480p</option>
+            </select>
+
+            <!-- Соотношение сторон -->
+            <select id="aspect-select" class="format-select">
+                <option value="16:9" selected>16:9</option>
+                <option value="4:3">4:3</option>
+                <option value="1:1">1:1</option>
+            </select>
+
+            <div class="toolbar-divider"></div>
+
+            <!-- Кнопка записи - красная -->
+            <button id="record-btn" class="record-btn" title="Начать запись">
+                <span class="record-icon"></span> Записать
+            </button>
+
+            <button id="download-btn" class="download-btn" style="display: none;">
+                ⬇️ Скачать
+            </button>
+
+            <!-- Прогресс -->
+            <div id="progress-bar" class="progress-inline" style="display: none;">
+                <div id="progress-fill"></div>
+                <span id="progress-text">0%</span>
+            </div>
+        </div>
+
+        <!-- Превью с video controls -->
+        <div class="preview-section">
+            <div id="studio-avatar-container" class="avatar-preview">
+                <!-- Video controls overlay -->
+                <div class="video-controls" id="video-controls" style="display: none;">
+                    <button class="play-btn" id="play-btn" title="Воспроизвести">▶</button>
                 </div>
             </div>
+        </div>
+
+        <!-- Поле ввода глоссов снизу -->
+        <div class="glosses-section">
+            <label for="glosses-input">
+                <strong>📝 Глоссы (последовательность анимаций)</strong>
+                <small>Введите слова через пробел заглавными буквами. Например: HELLO IDLE</small>
+            </label>
+            <textarea id="glosses-input" placeholder="HELLO IDLE HELLO" rows="2"></textarea>
+            <div id="glosses-preview" class="glosses-preview"></div>
         </div>
     </div>
 

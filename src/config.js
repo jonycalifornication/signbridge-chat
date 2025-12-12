@@ -1,12 +1,13 @@
 export const CONFIG = {
     defaultAvatar: 'Aibek',
     avatars: {
+        'Aidana': '/AINaz.vrm',  // Тот же файл что и Ainaz
         'Ainaz': '/AINaz.vrm',
         'Aibek': '/AliciaSolidmen.vrm',
     },
     animations: {
-        idle: '/idle.vrma', // Анимация покоя
-        hello: '/some.vrma', // Анимация покоя
+        IDLE: '/idle.vrma', // Анимация покоя
+        HELLO: '/some.vrma', // Анимация покоя
         // 'hello': '/hello.vrma',
     },
     camera: {

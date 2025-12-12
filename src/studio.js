@@ -3,7 +3,6 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { createVRMAnimationClip, VRMAnimationLoaderPlugin } from '@pixiv/three-vrm-animation';
 import { CONFIG } from './config.js';
-// gif.js будет загружен через CDN
 
 class StudioRecorder {
     constructor() {
@@ -22,13 +21,16 @@ class StudioRecorder {
         this.animLoader.register((parser) => new VRMAnimationLoaderPlugin(parser));
 
         this.animationCache = new Map();
-        this.currentAnimation = null;
+        this.glosses = [];
         this.recordedChunks = [];
         this.mediaRecorder = null;
         this.isRecording = false;
         this.backgroundType = 'green';
         this.customBackgroundTexture = null;
-        this.resolution = 720;
+        this.currentAvatar = CONFIG.defaultAvatar;
+        this.videoFormat = 'webm';
+        this.quality = '720';
+        this.aspectRatio = '16:9';
 
         this.init();
         this.setupUI();
@@ -37,14 +39,13 @@ class StudioRecorder {
     init() {
         this.scene = new THREE.Scene();
 
-        // Initial размеры (будут обновлены при выборе разрешения)
         const width = 1280;
         const height = 720;
         const aspect = width / height;
 
         this.camera = new THREE.PerspectiveCamera(CONFIG.camera.fov || 35.0, aspect, 0.1, 20.0);
-        this.camera.position.set(CONFIG.camera.posX, CONFIG.camera.posY, CONFIG.camera.posZ);
-        this.camera.lookAt(0.0, 1.0, 0.0);
+        this.camera.position.set(0, CONFIG.camera.posY, CONFIG.camera.posZ);
+        this.camera.lookAt(0.0, 1.2, 0.0);
 
         const dirLight = new THREE.DirectionalLight(0xffffff, CONFIG.lights.intensity);
         dirLight.position.set(0.0, 1.0, 2.0);
@@ -54,19 +55,15 @@ class StudioRecorder {
         this.renderer = new THREE.WebGLRenderer({
             alpha: true,
             antialias: true,
-            preserveDrawingBuffer: true, // Важно для записи
+            preserveDrawingBuffer: true,
             powerPreference: 'high-performance'
         });
         this.renderer.setSize(width, height);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio * 1.5, 2));
         this.container.appendChild(this.renderer.domElement);
 
-        // Устанавливаем начальный фон
         this.setBackground('green');
-
-        // Загружаем модель
         this.loadModel(CONFIG.avatars[CONFIG.defaultAvatar]);
-
         this.animate();
     }
 
@@ -75,13 +72,13 @@ class StudioRecorder {
 
         switch (type) {
             case 'green':
-                this.scene.background = new THREE.Color(0x00ff00); // Chroma key green
+                this.scene.background = new THREE.Color(0x00ff00);
                 break;
             case 'white':
                 this.scene.background = new THREE.Color(0xffffff);
                 break;
             case 'transparent':
-                this.scene.background = null; // Прозрачный
+                this.scene.background = null;
                 break;
             case 'custom':
                 if (this.customBackgroundTexture) {
@@ -108,37 +105,75 @@ class StudioRecorder {
         reader.readAsDataURL(imageFile);
     }
 
-    updateResolution(resolution) {
-        this.resolution = resolution;
-        let width, height;
+    getResolutionDimensions() {
+        let baseHeight;
 
-        switch (parseInt(resolution)) {
-            case 480:
-                width = 854;
-                height = 480;
+        // Получаем базовую высоту из качества
+        switch (this.quality) {
+            case '480':
+                baseHeight = 480;
                 break;
-            case 720:
-                width = 1280;
-                height = 720;
+            case '720':
+                baseHeight = 720;
                 break;
-            case 1080:
-                width = 1920;
-                height = 1080;
+            case '1080':
+                baseHeight = 1080;
                 break;
+            default:
+                baseHeight = 720;
         }
 
+        // Вычисляем ширину на основе соотношения сторон
+        let width, height = baseHeight;
+
+        switch (this.aspectRatio || '16:9') {
+            case '16:9':
+                width = Math.round(baseHeight * 16 / 9);
+                break;
+            case '4:3':
+                width = Math.round(baseHeight * 4 / 3);
+                break;
+            case '1:1':
+                width = baseHeight;
+                break;
+            default:
+                width = Math.round(baseHeight * 16 / 9);
+        }
+
+        return { width, height };
+    }
+
+    updateResolution(width, height) {
         this.renderer.setSize(width, height);
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
-        console.log(`📐 Разрешение изменено: ${width}×${height}`);
+        console.log(`📐 Разрешение: ${width}×${height}`);
     }
 
     loadModel(path) {
+        console.log(`🔄 Загрузка модели: ${path}`);
+
+        // Полная очистка старой модели
         if (this.currentVrm) {
+            console.log('🗑️ Удаление старой модели');
+
+            // Останавливаем миксер
+            if (this.mixer) {
+                this.mixer.stopAllAction();
+                this.mixer = null;
+            }
+
+            // Удаляем модель из сцены
+            this.scene.remove(this.currentVrm.scene);
+
+            // Глубокая очистка ресурсов
             VRMUtils.deepDispose(this.currentVrm.scene);
+
             this.currentVrm = null;
-            this.mixer = null;
         }
+
+        // Очищаем кэш анимаций при смене аватара
+        this.animationCache.clear();
 
         this.loader.load(
             path,
@@ -157,18 +192,31 @@ class StudioRecorder {
                 );
                 vrm.scene.scale.setScalar(CONFIG.avatar.scale);
 
+                // Поворачиваем модель на 180 градусов чтобы смотрела на камеру
+                vrm.scene.rotation.y = Math.PI;
+
                 this.mixer = new THREE.AnimationMixer(vrm.scene);
-                console.log('✅ VRM модель загружена');
+                console.log('✅ VRM модель загружена и настроена');
             },
-            (progress) => console.log('Загрузка VRM:', Math.round((progress.loaded / progress.total) * 100) + '%'),
-            (error) => console.error('Ошибка загрузки VRM:', error)
+            (progress) => {
+                const percent = Math.round((progress.loaded / progress.total) * 100);
+                console.log(`⏳ Загрузка: ${percent}%`);
+            },
+            (error) => console.error('❌ Ошибка загрузки:', error)
         );
     }
 
-    async loadAnimation(url) {
+    async loadAnimation(animName) {
+        const url = CONFIG.animations[animName];
+        if (!url) {
+            console.error(`Анимация "${animName}" не найдена`);
+            return null;
+        }
+
         if (this.animationCache.has(url)) {
             return this.animationCache.get(url);
         }
+
         if (!this.currentVrm) {
             console.error("VRM модель не загружена");
             return null;
@@ -194,7 +242,7 @@ class StudioRecorder {
                 return clip;
             }
 
-            console.error("Анимация не найдена в файле:", url);
+            console.error("Анимация не найдена:", url);
             return null;
         } catch (e) {
             console.error("Ошибка загрузки анимации:", e);
@@ -202,39 +250,54 @@ class StudioRecorder {
         }
     }
 
-    async playAnimation(name, loop = false) {
-        const url = CONFIG.animations[name];
-        if (!url) {
-            console.error(`Анимация "${name}" не найдена`);
-            return null;
-        }
-
-        const clip = await this.loadAnimation(url);
+    async playAnimation(name) {
+        const clip = await this.loadAnimation(name);
         if (!clip) return null;
 
         const action = this.mixer.clipAction(clip);
         action.reset();
-        action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce);
+        action.setLoop(THREE.LoopOnce);
         action.clampWhenFinished = true;
         action.play();
 
-        console.log(`🎬 Воспроизведение: ${name}`);
-        return { action, clip };
+        return new Promise((resolve) => {
+            const handler = (e) => {
+                if (e.action === action) {
+                    this.mixer.removeEventListener('finished', handler);
+                    resolve(clip.duration);
+                }
+            };
+            this.mixer.addEventListener('finished', handler);
+        });
     }
 
-    async startRecording(animationName) {
-        if (this.isRecording) {
-            console.warn('Запись уже идет');
+    async startRecording() {
+        if (this.isRecording) return;
+        if (this.glosses.length === 0) {
+            alert('Введите глоссы!');
             return;
         }
+
+        // Получаем размеры из качества
+        const { width, height } = this.getResolutionDimensions();
+        this.updateResolution(width, height);
 
         this.recordedChunks = [];
         const canvas = this.renderer.domElement;
 
-        // Создаем stream из canvas
-        const stream = canvas.captureStream(60); // 60 FPS
+        if (this.videoFormat === 'webm') {
+            await this.recordWebM();
+        } else if (this.videoFormat === 'gif') {
+            await this.recordGIF();
+        } else if (this.videoFormat === 'mp4') {
+            alert('MP4 экспорт в разработке. Используйте WebM.');
+        }
+    }
 
-        // Определяем MIME type
+    async recordWebM() {
+        const canvas = this.renderer.domElement;
+        const stream = canvas.captureStream(60);
+
         let mimeType = 'video/webm;codecs=vp9';
         if (!MediaRecorder.isTypeSupported(mimeType)) {
             mimeType = 'video/webm';
@@ -242,7 +305,7 @@ class StudioRecorder {
 
         this.mediaRecorder = new MediaRecorder(stream, {
             mimeType: mimeType,
-            videoBitsPerSecond: 8000000 // 8 Mbps для хорошего качества
+            videoBitsPerSecond: 8000000
         });
 
         this.mediaRecorder.ondataavailable = (event) => {
@@ -251,229 +314,218 @@ class StudioRecorder {
             }
         };
 
-        this.mediaRecorder.onstop = () => {
-            console.log(' ✅ Запись завершена');
-            this.isRecording = false;
-            this.showDownloadButtons();
-        };
-
-        // Запускаем анимацию и записываем
-        const result = await this.playAnimation(animationName, false);
-        if (!result) {
-            console.error('Не удалось запустить анимацию');
-            return;
-        }
-
-        const { clip } = result;
-        const duration = clip.duration;
+        let totalDuration = 0;
 
         this.mediaRecorder.start();
         this.isRecording = true;
-        console.log(`⏺️ Запись началась (${duration.toFixed(2)} сек)`);
+        document.getElementById('progress-bar').style.display = 'block';
 
-        // Показываем прогресс
-        this.updateProgress(0);
-        const startTime = Date.now();
-        const progressInterval = setInterval(() => {
-            const elapsed = (Date.now() - startTime) / 1000;
-            const progress = Math.min((elapsed / duration) * 100, 100);
-            this.updateProgress(progress);
+        // Воспроизводим последовательно все анимации
+        for (let i = 0; i < this.glosses.length; i++) {
+            const gloss = this.glosses[i];
+            console.log(`🎬 Воспроизведение: ${gloss} (${i + 1}/${this.glosses.length})`);
 
-            if (elapsed >= duration) {
-                clearInterval(progressInterval);
+            const duration = await this.playAnimation(gloss);
+            if (duration) {
+                totalDuration += duration;
+                const progress = ((i + 1) / this.glosses.length) * 100;
+                this.updateProgress(progress);
+
+                // Небольшая пауза между анимациями
+                await new Promise(resolve => setTimeout(resolve, 300));
             }
-        }, 100);
+        }
 
-        // Останавливаем запись автоматически после анимации
+        // Останавливаем запись
         setTimeout(() => {
             if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
                 this.mediaRecorder.stop();
             }
-            clearInterval(progressInterval);
+            this.isRecording = false;
+            document.getElementById('download-btn').style.display = 'block';
             this.updateProgress(100);
-        }, (duration + 0.5) * 1000); // +0.5 сек запас
+            console.log('✅ Запись завершена');
+        }, 500);
     }
 
-    downloadWebM() {
+    async recordGIF() {
+        alert('GIF экспорт в разработке. Используйте WebM.');
+    }
+
+    download() {
+        console.log('🔽 Download вызван');
+        console.log('📦 Chunks:', this.recordedChunks.length);
+
         if (this.recordedChunks.length === 0) {
-            console.warn('Нет данных для скачивания');
+            alert('Нет данных для скачивания');
             return;
         }
 
         const blob = new Blob(this.recordedChunks, { type: 'video/webm' });
+        console.log('💾 Blob создан:', blob.size, 'bytes');
+
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `animation_${Date.now()}.webm`;
+
+        // Формируем читаемое имя файла
+        const date = new Date();
+        const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        const timeStr = `${String(date.getHours()).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}`;
+        const glossesStr = this.glosses.join('_');
+        const extension = this.videoFormat === 'gif' ? 'gif' : 'webm';
+
+        a.download = `${glossesStr}_${this.quality}p_${this.aspectRatio.replace(':', 'x')}_${dateStr}_${timeStr}.${extension}`;
+
+        console.log('📁 Имя файла:', a.download);
+
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
+
         URL.revokeObjectURL(url);
-        console.log('⬇️ WebM скачан');
+        console.log(`⬇️ Файл скачан: ${a.download}`);
     }
 
-    async downloadGIF() {
-        if (!this.currentAnimation) {
-            alert('Сначала запишите анимацию!');
-            return;
-        }
+    updateProgress(percent) {
+        const fill = document.getElementById('progress-fill');
+        const text = document.getElementById('progress-text');
 
-        console.log('🎨 Создание GIF...');
-        this.updateProgress(0, 'Создание GIF...');
-
-        // Создаем GIF encoder
-        const gif = new GIF({
-            workers: 2,
-            quality: 10,
-            width: this.renderer.domElement.width,
-            height: this.renderer.domElement.height,
-            workerScript: '/node_modules/gif.js/dist/gif.worker.js'
-        });
-
-        // Воспроизводим анимацию снова и захватываем кадры
-        const result = await this.playAnimation(this.currentAnimation, false);
-        if (!result) return;
-
-        const { clip } = result;
-        const duration = clip.duration;
-        const fps = 30; // GIF FPS
-        const frameCount = Math.floor(duration * fps);
-        const frameDelay = 1000 / fps;
-
-        let frameIndex = 0;
-        const captureInterval = setInterval(() => {
-            if (frameIndex >= frameCount) {
-                clearInterval(captureInterval);
-                gif.render();
-                return;
-            }
-
-            // Захватываем текущий кадр
-            this.renderer.render(this.scene, this.camera);
-            const imageData = this.renderer.domElement.toDataURL('image/png');
-
-            const img = new Image();
-            img.onload = () => {
-                gif.addFrame(img, { delay: frameDelay, copy: true });
-            };
-            img.src = imageData;
-
-            frameIndex++;
-            this.updateProgress((frameIndex / frameCount) * 100, 'Создание GIF...');
-        }, frameDelay);
-
-        gif.on('finished', (blob) => {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `animation_${Date.now()}.gif`;
-            a.click();
-            URL.revokeObjectURL(url);
-            console.log('⬇️ GIF скачан');
-            this.updateProgress(100);
-        });
-    }
-
-    updateProgress(percent, label = 'Запись...') {
-        const progressContainer = document.getElementById('progress-container');
-        const progressFill = document.getElementById('progress-fill');
-        const progressText = document.getElementById('progress-text');
-        const progressLabel = progressContainer.querySelector('.progress-label');
-
-        progressContainer.style.display = 'block';
-        progressFill.style.width = `${percent}%`;
-        progressText.textContent = `${Math.round(percent)}%`;
-        progressLabel.textContent = label;
-
-        if (percent >= 100) {
-            setTimeout(() => {
-                progressContainer.style.display = 'none';
-            }, 1000);
-        }
-    }
-
-    showDownloadButtons() {
-        document.querySelector('.download-buttons').style.display = 'flex';
+        fill.style.width = `${percent}%`;
+        text.textContent = `${Math.round(percent)}%`;
     }
 
     setupUI() {
-        // Выбор анимации
-        const animSelect = document.getElementById('animation-select');
-        animSelect.addEventListener('change', (e) => {
-            const anim = e.target.value;
-            this.currentAnimation = anim;
-            document.getElementById('record-btn').disabled = !anim;
-            document.getElementById('play-preview-btn').disabled = !anim;
-            document.getElementById('preview-status').textContent = anim ? `Выбрана: ${anim}` : 'Выберите анимацию';
-        });
+        // Кнопки фонов - квадратики
+        const bgButtons = document.querySelectorAll('.bg-btn');
+        bgButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                // Убираем active со всех
+                bgButtons.forEach(b => b.classList.remove('active'));
+                // Добавляем active на текущую
+                btn.classList.add('active');
 
-        // Выбор фона
-        const bgRadios = document.querySelectorAll('input[name="background"]');
-        bgRadios.forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                const type = e.target.value;
-                this.setBackground(type);
+                const bgType = btn.dataset.bg;
+                this.setBackground(bgType);
 
-                const customUpload = document.getElementById('custom-background-upload');
-                customUpload.style.display = type === 'custom' ? 'block' : 'none';
+                // Показываем file input для custom
+                if (bgType === 'custom') {
+                    document.getElementById('bg-file').click();
+                }
             });
         });
 
-        // Загрузка кастомного фона
-        const bgFileInput = document.getElementById('background-file');
-        bgFileInput.addEventListener('change', (e) => {
+        // Кастомный фон
+        const bgFile = document.getElementById('bg-file');
+        bgFile.addEventListener('change', (e) => {
             const file = e.target.files[0];
-            if (file) {
-                this.setCustomBackground(file);
+            if (file) this.setCustomBackground(file);
+        });
 
-                // Превью
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                    const preview = document.getElementById('background-preview');
-                    preview.innerHTML = `<img src="${ev.target.result}" alt="Background preview">`;
-                };
-                reader.readAsDataURL(file);
+        // Глоссы с превью
+        const glossesInput = document.getElementById('glosses-input');
+        const glossesPreview = document.getElementById('glosses-preview');
+
+        glossesInput.addEventListener('input', (e) => {
+            const text = e.target.value.trim().toUpperCase();
+            // Теперь ищем анимации по точному совпадению (верхний регистр)
+            this.glosses = text.split(/\s+/).filter(g => g && CONFIG.animations[g]);
+
+            if (this.glosses.length > 0) {
+                glossesPreview.textContent = `✅ Готов к записи: ${this.glosses.join(' → ')} (${this.glosses.length} анимаций)`;
+                glossesPreview.style.color = '#10b981';
+            } else {
+                const availableAnims = Object.keys(CONFIG.animations).join(', ');
+                glossesPreview.textContent = `Введите глоссы (доступные: ${availableAnims})`;
+                glossesPreview.style.color = '#9ca3af';
             }
         });
 
-        // Выбор разрешения
-        const resSelect = document.getElementById('resolution-select');
-        resSelect.addEventListener('change', (e) => {
-            this.updateResolution(e.target.value);
+        // Выбор аватара
+        const avatarSelect = document.getElementById('avatar-select');
+        avatarSelect.value = this.currentAvatar;
+        avatarSelect.addEventListener('change', (e) => {
+            const avatarName = e.target.value;
+            this.currentAvatar = avatarName;
+            this.loadModel(CONFIG.avatars[avatarName]);
+            console.log(`🔄 Загружен аватар: ${avatarName}`);
+        });
+
+        // Формат видео
+        const videoFormatSelect = document.getElementById('video-format');
+        videoFormatSelect.addEventListener('change', (e) => {
+            this.videoFormat = e.target.value;
+        });
+
+        // Качество
+        const qualitySelect = document.getElementById('quality-select');
+        qualitySelect.addEventListener('change', (e) => {
+            this.quality = e.target.value;
+            const { width, height } = this.getResolutionDimensions();
+            this.updateResolution(width, height);
+            console.log(`📐 Качество: ${this.quality}p`);
+        });
+
+        // Соотношение сторон
+        const aspectSelect = document.getElementById('aspect-select');
+        aspectSelect.addEventListener('change', (e) => {
+            this.aspectRatio = e.target.value;
+            const { width, height } = this.getResolutionDimensions();
+            this.updateResolution(width, height);
+            console.log(`📺 Соотношение: ${this.aspectRatio}`);
         });
 
         // Кнопка записи
         const recordBtn = document.getElementById('record-btn');
         recordBtn.addEventListener('click', async () => {
-            if (!this.currentAnimation) {
-                alert('Выберите анимацию!');
-                return;
-            }
-
             recordBtn.disabled = true;
-            document.querySelector('.download-buttons').style.display = 'none';
+            document.getElementById('download-btn').style.display = 'none';
+            document.getElementById('video-controls').style.display = 'none';
 
-            await this.startRecording(this.currentAnimation);
+            await this.startRecording();
 
             recordBtn.disabled = false;
         });
 
-        // Предпросмотр
-        const playBtn = document.getElementById('play-preview-btn');
-        playBtn.addEventListener('click', () => {
-            if (this.currentAnimation) {
-                this.playAnimation(this.currentAnimation, false);
+        // Кнопка скачивания
+        const downloadBtn = document.getElementById('download-btn');
+        downloadBtn.addEventListener('click', () => {
+            this.download();
+        });
+
+        // Video controls - Play button
+        const playBtn = document.getElementById('play-btn');
+        let isPlaying = false;
+
+        playBtn.addEventListener('click', async () => {
+            if (!this.glosses || this.glosses.length === 0) {
+                alert('Введите глоссы!');
+                return;
             }
+
+            if (isPlaying) return;
+
+            isPlaying = true;
+            playBtn.textContent = '⏸';
+
+            // Воспроизводим все глоссы последовательно
+            for (const gloss of this.glosses) {
+                if (!isPlaying) break;
+                await this.playAnimation(gloss);
+            }
+
+            isPlaying = false;
+            playBtn.textContent = '▶';
         });
 
-        // Скачивание WebM
-        const downloadWebMBtn = document.getElementById('download-webm-btn');
-        downloadWebMBtn.addEventListener('click', () => {
-            this.downloadWebM();
-        });
-
-        // Скачивание GIF (заглушка пока)
-        const downloadGIFBtn = document.getElementById('download-gif-btn');
-        downloadGIFBtn.addEventListener('click', () => {
-            this.downloadGIF();
+        // Показываем play button если есть глоссы
+        glossesInput.addEventListener('input', () => {
+            const videoControls = document.getElementById('video-controls');
+            if (this.glosses.length > 0) {
+                videoControls.style.display = 'block';
+            } else {
+                videoControls.style.display = 'none';
+            }
         });
     }
 
@@ -486,5 +538,4 @@ class StudioRecorder {
     }
 }
 
-// Инициализация при загрузке
 new StudioRecorder();
