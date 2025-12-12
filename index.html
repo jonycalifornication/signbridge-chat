@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avatar Widget Local</title>
+    <style>
+        body { margin: 0; background: #f0f0f0; font-family: sans-serif; }
+        #app { padding: 20px; }
+
+        /* Контейнер виджета */
+        #avatar-widget-container {
+            position: fixed;
+            bottom: 0;
+            right: 20px;
+            width: 300px;
+            height: 400px;
+            z-index: 1000;
+            pointer-events: none; /* Пропускаем клики мимо модели */
+        }
+        canvas { pointer-events: auto; } /* Аватар ловит клики */
+    </style>
+</head>
+<body>
+    <div id="app">
+        <h1>Локальный сервер работает!</h1>
+        <p>Выделите этот текст для теста (функционал добавим позже).</p>
+    </div>
+
+    <div id="avatar-widget-container"></div>
+
+    <script type="module" src="/src/widget.js"></script>
+</body>
+</html>
