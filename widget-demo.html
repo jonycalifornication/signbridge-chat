@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SignBridge Avatar Widget - Standalone</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .demo-container {
+            max-width: 1200px;
+            width: 100%;
+        }
+
+        .demo-header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        .demo-header h1 {
+            font-size: 42px;
+            margin-bottom: 12px;
+            font-weight: 700;
+        }
+
+        .demo-header p {
+            font-size: 18px;
+            opacity: 0.9;
+        }
+
+        .demo-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            align-items: start;
+        }
+
+        .demo-card {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .demo-card h2 {
+            font-size: 24px;
+            margin-bottom: 16px;
+            color: #1F2937;
+        }
+
+        .demo-card p {
+            color: #6B7280;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+
+        .widget-container {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 16px;
+            padding: 20px;
+            min-height: 500px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #standalone-widget {
+            width: 400px;
+            height: 500px;
+            position: relative;
+            background: transparent;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+
+        .interactive-demo {
+            background: #F9FAFB;
+            padding: 20px;
+            border-radius: 12px;
+            margin-top: 20px;
+        }
+
+        .interactive-demo h3 {
+            font-size: 18px;
+            margin-bottom: 12px;
+            color: #374151;
+        }
+
+        .word-trigger {
+            display: inline-block;
+            padding: 8px 16px;
+            margin: 5px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            user-select: text;
+            transition: all 0.3s;
+            color: white;
+        }
+
+        .word-trigger.hello {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .word-trigger.idle {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .word-trigger:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .code-block {
+            background: #1F2937;
+            color: #E5E7EB;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+            overflow-x: auto;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .code-block .comment {
+            color: #9CA3AF;
+        }
+
+        .code-block .tag {
+            color: #F472B6;
+        }
+
+        .code-block .attr {
+            color: #60A5FA;
+        }
+
+        .code-block .string {
+            color: #34D399;
+        }
+
+        @media (max-width: 900px) {
+            .demo-grid {
+                grid-template-columns: 1fr;
+            }
+
+            #standalone-widget {
+                width: 100%;
+                max-width: 400px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="demo-container">
+        <div class="demo-header">
+            <h1>👋 SignBridge Avatar Widget</h1>
+            <p>Прозрачный виджет сурдопереводчика для встраивания</p>
+        </div>
+
+        <div class="demo-grid">
+            <!-- Виджет -->
+            <div class="demo-card">
+                <h2>✨ Демо виджета</h2>
+                <p>Виджет показывает только верхнюю часть тела (до пояса), как профессиональные сурдопереводчики.</p>
+
+                <div class="widget-container">
+                    <div id="standalone-widget"></div>
+                </div>
+
+                <div class="interactive-demo">
+                    <h3>🎭 Попробуйте интерактивность:</h3>
+                    <p style="margin-bottom: 10px;">Выделите слова мышью:</p>
+                    <span class="word-trigger hello">hello</span>
+                    <span class="word-trigger idle">idle</span>
+                </div>
+            </div>
+
+            <!-- Инструкции -->
+            <div class="demo-card">
+                <h2>📦 Как встроить на свой сайт</h2>
+                <p>Скопируйте этот код и вставьте в любое место вашей страницы:</p>
+
+                <div class="code-block">
+                    <span class="comment">&lt;!-- 1. Подключите стили --&gt;</span>
+                    <span class="tag">&lt;link</span> <span class="attr">rel</span>=<span
+                        class="string">"stylesheet"</span> <span class="attr">href</span>=<span
+                        class="string">"/src/main.css"</span><span class="tag">&gt;</span>
+
+                    <span class="comment">&lt;!-- 2. Создайте контейнер --&gt;</span>
+                    <span class="tag">&lt;div</span> <span class="attr">id</span>=<span
+                        class="string">"avatar-widget-container"</span><span class="tag">&gt;&lt;/div&gt;</span>
+
+                    <span class="comment">&lt;!-- 3. Подключите скрипт --&gt;</span>
+                    <span class="tag">&lt;script</span> <span class="attr">type</span>=<span
+                        class="string">"module"</span> <span class="attr">src</span>=<span
+                        class="string">"/src/widget.js"</span><span class="tag">&gt;&lt;/script&gt;</span>
+                </div>
+
+                <h2 style="margin-top: 30px;">⚙️ Основные возможности</h2>
+                <ul style="color: #6B7280; line-height: 2; margin-left: 20px;">
+                    <li>✅ Прозрачный фон</li>
+                    <li>✅ Портретная ориентация (как сурдопереводчик)</li>
+                    <li>✅ Интерактивные анимации при выделении текста</li>
+                    <li>✅ Адаптивный дизайн</li>
+                    <li>✅ Легкая настройка через config.js</li>
+                    <li>✅ Поддержка VRM/VRMA форматов</li>
+                </ul>
+
+                <h2 style="margin-top: 30px;">🎨 Настройка положения</h2>
+                <p>Измените CSS для нужного расположения:</p>
+
+                <div class="code-block" style="font-size: 13px;">
+                    <span class="comment">/* Правый нижний угол (по умолчанию) */</span>
+                    #avatar-widget-container {
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    }
+
+                    <span class="comment">/* Левый нижний угол */</span>
+                    #avatar-widget-container {
+                    position: fixed;
+                    bottom: 20px;
+                    left: 20px;
+                    }
+
+                    <span class="comment">/* Встроенный виджет */</span>
+                    #avatar-widget-container {
+                    position: relative;
+                    display: inline-block;
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/src/widget.js"></script>
+</body>
+
+</html>

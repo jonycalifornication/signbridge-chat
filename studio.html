@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Студия записи анимаций - SignBridge</title>
+    <link rel="stylesheet" href="/src/studio.css">
+    <script src="https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.js"></script>
+</head>
+
+<body>
+    <div class="studio-wrapper">
+        <header class="studio-header">
+            <h1>🎬 Студия записи анимаций</h1>
+            <a href="/" class="back-link">← Вернуться на главную</a>
+        </header>
+
+        <div class="studio-container">
+            <!-- Панель управления -->
+            <div class="control-panel">
+                <div class="control-section">
+                    <h3>📹 Анимация</h3>
+                    <label for="animation-select">Выберите анимацию:</label>
+                    <select id="animation-select">
+                        <option value="">-- Выберите --</option>
+                        <option value="idle">Idle (покой)</option>
+                        <option value="hello">Hello (приветствие)</option>
+                    </select>
+                </div>
+
+                <div class="control-section">
+                    <h3>🎨 Фон</h3>
+                    <div class="background-options">
+                        <label class="radio-option">
+                            <input type="radio" name="background" value="green" checked>
+                            <span class="radio-label">
+                                <span class="color-preview" style="background: #00ff00;"></span>
+                                Зеленый (Chroma Key)
+                            </span>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="background" value="white">
+                            <span class="radio-label">
+                                <span class="color-preview" style="background: #ffffff; border: 1px solid #ddd;"></span>
+                                Белый
+                            </span>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="background" value="transparent">
+                            <span class="radio-label">
+                                <span class="color-preview transparent-preview"></span>
+                                Прозрачный
+                            </span>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="background" value="custom">
+                            <span class="radio-label">
+                                <span class="color-preview" style="background: #f0f0f0;">📁</span>
+                                Свое изображение
+                            </span>
+                        </label>
+                    </div>
+
+                    <div id="custom-background-upload" class="custom-upload" style="display: none;">
+                        <input type="file" id="background-file" accept="image/*">
+                        <label for="background-file" class="file-label">
+                            📂 Выбрать изображение
+                        </label>
+                        <div id="background-preview" class="bg-preview"></div>
+                    </div>
+                </div>
+
+                <div class="control-section">
+                    <h3>📐 Разрешение</h3>
+                    <select id="resolution-select">
+                        <option value="480">480p (854×480)</option>
+                        <option value="720" selected>720p (1280×720)</option>
+                        <option value="1080">1080p (1920×1080)</option>
+                    </select>
+                </div>
+
+                <div class="control-section">
+                    <h3>💾 Действия</h3>
+                    <button id="record-btn" class="btn btn-primary" disabled>
+                        ⏺️ Записать анимацию
+                    </button>
+
+                    <div class="download-buttons" style="display: none;">
+                        <button id="download-webm-btn" class="btn btn-success">
+                            ⬇️ Скачать WebM
+                        </button>
+                        <button id="download-gif-btn" class="btn btn-success">
+                            ⬇️ Скачать GIF
+                        </button>
+                    </div>
+
+                    <div id="progress-container" class="progress-container" style="display: none;">
+                        <div class="progress-label">Запись...</div>
+                        <div class="progress-bar">
+                            <div id="progress-fill" class="progress-fill"></div>
+                        </div>
+                        <div id="progress-text" class="progress-text">0%</div>
+                    </div>
+                </div>
+
+                <div class="info-section">
+                    <h4>ℹ️ Информация</h4>
+                    <ul>
+                        <li><strong>WebM:</strong> Видео формат с поддержкой прозрачности</li>
+                        <li><strong>GIF:</strong> Анимированное изображение (меньше размер)</li>
+                        <li><strong>Chroma Key:</strong> Зеленый фон для удаления в редакторах</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Панель превью -->
+            <div class="preview-panel">
+                <div class="preview-header">
+                    <h3>👁️ Превью</h3>
+                    <div class="preview-info">
+                        <span id="preview-status">Выберите анимацию</span>
+                    </div>
+                </div>
+                <div id="studio-avatar-container" class="avatar-container"></div>
+                <div class="preview-controls">
+                    <button id="play-preview-btn" class="btn btn-secondary" disabled>
+                        ▶️ Предпросмотр
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/src/studio.js"></script>
+</body>
+
+</html>

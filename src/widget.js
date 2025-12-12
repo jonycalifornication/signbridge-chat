@@ -24,30 +24,51 @@ class AvatarWidget {
 
         this.animationCache = new Map();
         this.idleAction = null;
+        this.currentAction = null;  // Текущая воспроизводимая анимация
+        // Состояние виджета (свернут/развернут)
+        this.isExpanded = false;
 
         this.init();
         this.setupUI();
+        this.setupTextSelection();
+        this.setupWidgetToggle();
     }
 
     init() {
         this.scene = new THREE.Scene();
-        const aspect = this.container.clientWidth / this.container.clientHeight;
-        this.camera = new THREE.PerspectiveCamera(25.0, aspect, 0.1, 20.0);
+
+        // Проверяем размеры контейнера, если 0 - используем минимальные
+        const width = this.container.clientWidth || 150;
+        const height = this.container.clientHeight || 180;
+        const aspect = width / height;
+
+        this.camera = new THREE.PerspectiveCamera(CONFIG.camera.fov || 35.0, aspect, 0.1, 20.0);
         this.camera.position.set(CONFIG.camera.posX, CONFIG.camera.posY, CONFIG.camera.posZ);
-        this.camera.lookAt(0.0, 1.3, 0.0);
+        this.camera.lookAt(0.0, 1.0, 0.0);  // Смотрим на уровень груди
 
         const dirLight = new THREE.DirectionalLight(0xffffff, CONFIG.lights.intensity);
         dirLight.position.set(0.0, 1.0, 2.0);
         this.scene.add(dirLight);
         this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 
-        this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-        this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
-        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer = new THREE.WebGLRenderer({
+            alpha: true,
+            antialias: true,
+            powerPreference: 'high-performance'
+        });
+        this.renderer.setSize(width, height);
+        // Увеличиваем pixelRatio для лучшего качества (но не более 2 для производительности)
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio * 1.5, 2));
         this.renderer.domElement.style.display = 'block';
         this.container.appendChild(this.renderer.domElement);
 
         window.addEventListener('resize', () => this.onResize());
+
+        // Принудительный ресайз после инициализации для корректных размеров
+        setTimeout(() => {
+            this.onResize();
+        }, 100);
+
         this.animate();
     }
 
@@ -72,6 +93,121 @@ class AvatarWidget {
         });
     }
 
+    setupTextSelection() {
+        // Обработчик выделения текста на странице
+        document.addEventListener('mouseup', () => {
+            this.handleTextSelection();
+        });
+
+        // Для поддержки мобильных устройств
+        document.addEventListener('touchend', () => {
+            setTimeout(() => this.handleTextSelection(), 100);
+        });
+
+        console.log('✅ Обработчик выделения текста подключен. Выделите "hello" или "idle" для воспроизведения анимации.');
+    }
+
+    handleTextSelection() {
+        const selectedText = window.getSelection().toString().trim().toLowerCase();
+
+        if (!selectedText) {
+            return; // Ничего не выделено
+        }
+
+        console.log(`📝 Выделен текст: "${selectedText}"`);
+
+        // Разворачиваем виджет при выделении текста
+        if (!this.isExpanded) {
+            this.expand();
+        }
+
+        // Проверяем, есть ли анимация с таким названием
+        if (CONFIG.animations[selectedText]) {
+            console.log(`🎬 Запуск анимации: ${selectedText}`);
+            this.showNotification(`🎬 ${selectedText}`);
+            this.playAnimation(selectedText);
+        } else {
+            // Проверяем, содержит ли выделенный текст название анимации
+            for (const animName in CONFIG.animations) {
+                if (selectedText.includes(animName)) {
+                    console.log(`🎬 Найдено совпадение, запуск анимации: ${animName}`);
+                    this.showNotification(`🎬 ${animName}`);
+                    this.playAnimation(animName);
+                    break;
+                }
+            }
+        }
+    }
+
+    showNotification(message) {
+        // Удаляем предыдущее уведомление, если оно есть
+        const existing = document.querySelector('.animation-notification');
+        if (existing) {
+            existing.remove();
+        }
+
+        // Создаем новое уведомление
+        const notification = document.createElement('div');
+        notification.className = 'animation-notification';
+        notification.textContent = message;
+        document.body.appendChild(notification);
+
+        // Автоматически удаляем через 2 секунды
+        setTimeout(() => {
+            notification.style.opacity = '0';
+            setTimeout(() => notification.remove(), 300);
+        }, 2000);
+    }
+
+    setupWidgetToggle() {
+        // Изначально виджет компактный
+        this.container.classList.add('compact');
+
+        // Клик на контейнер для разворачивания
+        this.container.addEventListener('click', (e) => {
+            if (!this.isExpanded) {
+                this.expand();
+            }
+        });
+
+        // Создаем кнопку закрытия
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'widget-close-btn';
+        closeBtn.innerHTML = '✕';
+        closeBtn.title = 'Свернуть';
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.collapse();
+        });
+        this.container.appendChild(closeBtn);
+    }
+
+    expand() {
+        if (this.isExpanded) return;
+
+        this.isExpanded = true;
+        this.container.classList.remove('compact');
+        this.container.classList.add('expanded');
+        console.log('🔼 Виджет развернут');
+    }
+
+    collapse() {
+        if (!this.isExpanded) return;
+
+        this.isExpanded = false;
+        this.container.classList.remove('expanded');
+        this.container.classList.add('compact');
+        console.log('🔽 Виджет свернут');
+    }
+
+    toggleExpanded() {
+        if (this.isExpanded) {
+            this.collapse();
+        } else {
+            this.expand();
+        }
+    }
+
     loadModelByName(name) {
         const modelPath = CONFIG.avatars[name];
         if (!modelPath) {
@@ -87,6 +223,8 @@ class AvatarWidget {
             VRMUtils.deepDispose(this.currentVrm.scene);
             this.currentVrm = null;
             this.mixer = null;
+            this.idleAction = null;
+            this.currentAction = null;
         }
 
         this.loader.load(
@@ -123,22 +261,52 @@ class AvatarWidget {
 
         console.log(`Loading animation from ${url}`);
         try {
+            // Пытаемся загрузить через VRMAnimationLoaderPlugin
             const gltf = await this.animLoader.loadAsync(url);
-            const vrmAnimation = gltf.userData.vrmAnimation;
 
-            if (!vrmAnimation) {
-                console.error("No vrmAnimation found in file:", url);
-                return null;
+            // Детальная отладка
+            console.log("GLTF loaded:", gltf);
+            console.log("GLTF userData:", gltf.userData);
+            console.log("GLTF animations:", gltf.animations);
+
+            // Сначала проверяем стандартные animations в GLTF
+            if (gltf.animations && gltf.animations.length > 0) {
+                console.log(`Found ${gltf.animations.length} standard GLTF animation(s)`);
+
+                // Пытаемся создать VRM анимацию из стандартной GLTF анимации
+                // если есть vrmAnimation в userData
+                if (gltf.userData.vrmAnimations && gltf.userData.vrmAnimations.length > 0) {
+                    console.log("Found vrmAnimations in userData");
+                    const vrmAnimation = gltf.userData.vrmAnimations[0];
+                    const clip = createVRMAnimationClip(vrmAnimation, this.currentVrm);
+                    console.log("VRM Animation clip created:", clip);
+                    this.animationCache.set(url, clip);
+                    return clip;
+                }
+
+                // Проверяем единичный vrmAnimation
+                if (gltf.userData.vrmAnimation) {
+                    console.log("Found vrmAnimation in userData");
+                    const clip = createVRMAnimationClip(gltf.userData.vrmAnimation, this.currentVrm);
+                    console.log("VRM Animation clip created:", clip);
+                    this.animationCache.set(url, clip);
+                    return clip;
+                }
+
+                // Используем первую стандартную анимацию
+                console.log("Using first standard GLTF animation");
+                const clip = gltf.animations[0];
+                this.animationCache.set(url, clip);
+                console.log("Standard animation clip cached:", clip);
+                return clip;
             }
 
-            console.log("VRM Animation found, creating clip...");
-            const clip = createVRMAnimationClip(vrmAnimation, this.currentVrm);
-            console.log("Clip created:", clip);
-
-            this.animationCache.set(url, clip);
-            return clip;
+            console.error("No animations found in file:", url);
+            console.log("Available keys in userData:", Object.keys(gltf.userData));
+            return null;
         } catch (e) {
             console.error("Error loading animation:", e);
+            console.error("Error stack:", e.stack);
             return null;
         }
     }
@@ -159,27 +327,56 @@ class AvatarWidget {
         }
         const clip = await this.loadAnimation(url);
         if (clip) {
+            // Останавливаем текущую анимацию, если она воспроизводится
+            if (this.currentAction && this.currentAction.isRunning()) {
+                console.log('⏸️ Останавливаем предыдущую анимацию');
+                this.currentAction.fadeOut(0.2);
+                this.currentAction.stop();
+            }
+
             const action = this.mixer.clipAction(clip);
+            action.reset();
             action.setLoop(THREE.LoopOnce);
             action.clampWhenFinished = true;
-            action.crossFadeFrom(this.idleAction, 0.2, true);
-            action.play();
 
-            this.mixer.addEventListener('finished', (e) => {
+            // Плавный переход от idle
+            if (this.idleAction && this.idleAction.isRunning()) {
+                action.crossFadeFrom(this.idleAction, 0.3, true);
+            }
+
+            action.play();
+            this.currentAction = action;
+            console.log(`🎬 Запущена анимация: ${name}`);
+
+            // Убираем старые обработчики и добавляем новый
+            if (this.onAnimationFinished) {
+                this.mixer.removeEventListener('finished', this.onAnimationFinished);
+            }
+            this.onAnimationFinished = (e) => {
                 if (e.action === action) {
-                    this.idleAction.reset().crossFadeFrom(action, 0.2, true).play();
+                    console.log('✅ Анимация завершена, возврат к idle');
+                    this.currentAction = null;
+                    if (this.idleAction) {
+                        this.idleAction.reset().crossFadeFrom(action, 0.3, true).play();
+                    }
                 }
-            });
+            };
+            this.mixer.addEventListener('finished', this.onAnimationFinished);
         }
     }
 
     onResize() {
-        if (!this.container) return;
-        const width = this.container.clientWidth;
-        const height = this.container.clientHeight;
-        this.renderer.setSize(width, height);
-        this.camera.aspect = width / height;
-        this.camera.updateProjectionMatrix();
+        if (!this.container || !this.renderer) return;
+
+        // Используем fallback размеры если контейнер не имеет размеров
+        const width = this.container.clientWidth || 150;
+        const height = this.container.clientHeight || 180;
+
+        if (width > 0 && height > 0) {
+            this.renderer.setSize(width, height);
+            this.camera.aspect = width / height;
+            this.camera.updateProjectionMatrix();
+        }
     }
 
     animate() {
@@ -191,4 +388,12 @@ class AvatarWidget {
     }
 }
 
-new AvatarWidget('avatar-widget-container');
+// Инициализация для основного контейнера
+if (document.getElementById('avatar-widget-container')) {
+    new AvatarWidget('avatar-widget-container');
+}
+
+// Инициализация для standalone виджета
+if (document.getElementById('standalone-widget')) {
+    new AvatarWidget('standalone-widget');
+}

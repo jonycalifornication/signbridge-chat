@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>VRMA Test</title>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+            "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.0.0/lib/three-vrm.module.js",
+            "@pixiv/three-vrm-animation": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@3.4.4/lib/three-vrm-animation.module.js"
+        }
+    }
+    </script>
+</head>
+
+<body>
+    <h1>VRMA File Inspector</h1>
+    <div id="output"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { VRMLoaderPlugin } from '@pixiv/three-vrm';
+        import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
+
+        const output = document.getElementById('output');
+
+        async function inspectFiles() {
+            // Загружаем VRM модель
+            const vrmLoader = new GLTFLoader();
+            vrmLoader.register((parser) => new VRMLoaderPlugin(parser));
+
+            output.innerHTML += '<h2>Loading VRM Model...</h2>';
+            const vrmGltf = await vrmLoader.loadAsync('/AINaz.vrm');
+            const vrm = vrmGltf.userData.vrm;
+            output.innerHTML += '<p>✅ VRM Model loaded successfully</p>';
+
+            // Загружаем VRMA анимацию
+            const animLoader = new GLTFLoader();
+            animLoader.register((parser) => new VRMAnimationLoaderPlugin(parser));
+
+            output.innerHTML += '<h2>Loading VRMA Animation (12.vrma)...</h2>';
+            try {
+                const animGltf = await animLoader.loadAsync('/12.vrma');
+                output.innerHTML += '<p>✅ VRMA file loaded</p>';
+                output.innerHTML += '<pre>' + JSON.stringify({
+                    hasAnimations: !!animGltf.animations,
+                    animationsLength: animGltf.animations?.length || 0,
+                    userDataKeys: Object.keys(animGltf.userData),
+                    hasVrmAnimation: !!animGltf.userData.vrmAnimation,
+                    hasVrmAnimations: !!animGltf.userData.vrmAnimations
+                }, null, 2) + '</pre>';
+
+                if (animGltf.animations && animGltf.animations.length > 0) {
+                    output.innerHTML += '<h3>Animation tracks:</h3>';
+                    animGltf.animations[0].tracks.forEach((track, i) => {
+                        output.innerHTML += `<p>${i}: ${track.name} (${track.times.length} keyframes)</p>`;
+                    });
+                }
+
+                if (animGltf.userData.vrmAnimation) {
+                    output.innerHTML += '<p>✅ vrmAnimation found in userData</p>';
+                    try {
+                        const clip = createVRMAnimationClip(animGltf.userData.vrmAnimation, vrm);
+                        output.innerHTML += '<p>✅ VRM Animation clip created successfully!</p>';
+                        output.innerHTML += '<p>Clip name: ' + clip.name + '</p>';
+                        output.innerHTML += '<p>Duration: ' + clip.duration + 's</p>';
+                        output.innerHTML += '<p>Tracks: ' + clip.tracks.length + '</p>';
+                    } catch (e) {
+                        output.innerHTML += '<p>❌ Error creating VRM animation clip: ' + e.message + '</p>';
+                    }
+                }
+            } catch (e) {
+                output.innerHTML += '<p>❌ Error loading VRMA: ' + e.message + '</p>';
+                output.innerHTML += '<pre>' + e.stack + '</pre>';
+            }
+
+            // Проверяем idle.vrma
+            output.innerHTML += '<h2>Loading VRMA Animation (idle.vrma)...</h2>';
+            try {
+                const idleGltf = await animLoader.loadAsync('/idle.vrma');
+                output.innerHTML += '<p>✅ idle.vrma file loaded</p>';
+                output.innerHTML += '<pre>' + JSON.stringify({
+                    hasAnimations: !!idleGltf.animations,
+                    animationsLength: idleGltf.animations?.length || 0,
+                    userDataKeys: Object.keys(idleGltf.userData),
+                    hasVrmAnimation: !!idleGltf.userData.vrmAnimation,
+                    hasVrmAnimations: !!idleGltf.userData.vrmAnimations
+                }, null, 2) + '</pre>';
+            } catch (e) {
+                output.innerHTML += '<p>❌ Error loading idle.vrma: ' + e.message + '</p>';
+            }
+        }
+
+        inspectFiles().catch(e => {
+            output.innerHTML += '<p>❌ Fatal error: ' + e.message + '</p>';
+            console.error(e);
+        });
+    </script>
+</body>
+
+</html>
