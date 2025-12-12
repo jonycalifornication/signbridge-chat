@@ -1,34 +1,54 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="kk">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Avatar Widget Local</title>
-    <style>
-        body { margin: 0; background: #f0f0f0; font-family: sans-serif; }
-        #app { padding: 20px; }
-
-        /* Контейнер виджета */
-        #avatar-widget-container {
-            position: fixed;
-            bottom: 0;
-            right: 20px;
-            width: 300px;
-            height: 400px;
-            z-index: 1000;
-            pointer-events: none; /* Пропускаем клики мимо модели */
-        }
-        canvas { pointer-events: auto; } /* Аватар ловит клики */
-    </style>
+    <title>SignBridge - Local Dev</title>
+    <link rel="stylesheet" href="/src/main.css">
 </head>
 <body>
-    <div id="app">
-        <h1>Локальный сервер работает!</h1>
-        <p>Выделите этот текст для теста (функционал добавим позже).</p>
+
+    <header>
+        <div class="logo">
+            <span style="font-size: 24px;">👋</span>
+            SignBridge
+        </div>
+        <nav>
+            <a href="#" class="active">Негізгі</a>
+            <a href="#">Сөздік</a>
+            <a href="#">Үйрену</a>
+            <a href="#">KazMorph</a>
+        </nav>
+        <button class="btn-login">➜ Кіру</button>
+    </header>
+
+    <main>
+        <div class="card">
+            <h1>👋 Сәлем!</h1>
+            <p>
+                Менің атым – AlNaz. Бұл портал – есту қабілеті нашар адамдар үшін арнайы жасалған.
+                <br><br>
+                Выделите любой текст на странице, чтобы проверить работу аватара.
+            </p>
+            <div class="dots">
+                <div class="dot active"></div>
+                <div class="dot"></div>
+                <div class="dot"></div>
+            </div>
+        </div>
+    </main>
+
+    <div class="bottom-title">
+        <h2>Біздің цифрлық аватарлар</h2>
+        <div class="avatar-selector">
+            <label for="avatar-select">Аватарды таңдаңыз:</label>
+            <select id="avatar-select"></select>
+        </div>
     </div>
 
     <div id="avatar-widget-container"></div>
 
     <script type="module" src="/src/widget.js"></script>
+
 </body>
 </html>

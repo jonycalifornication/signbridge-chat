@@ -1,0 +1,147 @@
+/* src/main.css */
+
+/* Импорт шрифта Inter прямо в CSS */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+/* 1. Сброс стилей и общие настройки */
+body {
+    margin: 0;
+    padding: 0;
+    background-color: #F9FAFB;
+    font-family: 'Inter', sans-serif;
+    color: #111827;
+    overflow-x: hidden;
+}
+
+/* 2. Шапка (Header) */
+header {
+    background: white;
+    padding: 15px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.logo {
+    font-weight: 700;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.logo span { color: #111827; }
+
+nav a {
+    text-decoration: none;
+    color: #374151;
+    margin: 0 15px;
+    font-weight: 500;
+    font-size: 15px;
+    transition: color 0.2s;
+}
+
+nav a:hover {
+    color: #4F46E5;
+}
+
+nav a.active {
+    color: #4F46E5;
+    border-bottom: 2px solid #4F46E5;
+    padding-bottom: 21px;
+}
+
+.btn-login {
+    background: linear-gradient(90deg, #4F46E5 0%, #4338CA 100%);
+    color: white;
+    border: none;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2);
+    transition: transform 0.1s;
+}
+
+.btn-login:active {
+    transform: scale(0.98);
+}
+
+/* 3. Основной контент (Hero Section) */
+main {
+    max-width: 1200px;
+    margin: 60px auto;
+    padding: 0 20px;
+    display: flex;
+    gap: 40px;
+    align-items: flex-start;
+}
+
+/* Левая карточка */
+.card {
+    background: white;
+    border-radius: 16px;
+    padding: 40px;
+    width: 45%;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+    border-left: 5px solid #4F46E5;
+    position: relative;
+}
+
+.card h1 {
+    font-size: 36px;
+    margin: 10px 0 20px 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.card p {
+    line-height: 1.6;
+    color: #4B5563;
+    font-size: 18px;
+}
+
+.dots {
+    margin-top: 30px;
+    display: flex;
+    gap: 5px;
+}
+.dot { width: 8px; height: 8px; background: #E5E7EB; border-radius: 50%; }
+.dot.active { background: #4F46E5; }
+
+/* Правая часть (Заголовок снизу) */
+.bottom-title {
+    position: absolute;
+    bottom: 40px;
+    width: 100%;
+    text-align: center;
+    left: 0;
+}
+.bottom-title h2 {
+    font-size: 28px;
+    color: #1F2937;
+}
+
+/* 4. Контейнер Виджета (Аватар) */
+#avatar-widget-container {
+    position: fixed;
+    bottom: 0;
+    right: 10%;
+    width: 400px;
+    height: 600px;
+    z-index: 1000;
+    pointer-events: none;
+}
+
+canvas {
+    pointer-events: auto;
+}
+
+/* Адаптив */
+@media (max-width: 900px) {
+    main { flex-direction: column; }
+    .card { width: 100%; }
+    #avatar-widget-container { right: 0; }
+}

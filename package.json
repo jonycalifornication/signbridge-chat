@@ -9,8 +9,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "three": "^0.169.0",
-    "@pixiv/three-vrm": "^3.0.0"
+    "@pixiv/three-vrm": "^3.0.0",
+    "@pixiv/three-vrm-animation": "^3.4.4",
+    "three": "^0.169.0"
   },
   "devDependencies": {
     "vite": "^5.4.0"

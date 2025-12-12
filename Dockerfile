@@ -2,9 +2,15 @@
 FROM node:20-alpine as builder
 WORKDIR /app
 
-# Copy package files and install dependencies
+# Install compatibility libraries for Alpine
+RUN apk add --no-cache libc6-compat
+
+# Copy package files
 COPY package.json package-lock.json ./
-RUN npm install
+
+# Install dependencies
+# We use --force to ensure platform-specific binaries are correctly installed
+RUN npm ci
 
 # Copy the rest of the application source code
 COPY . .
