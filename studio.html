@@ -6,7 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Студия записи - SignBridge</title>
     <link rel="stylesheet" href="/src/studio.css">
-    <script src="https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.js"></script>
 </head>
 
 <body>
@@ -15,14 +14,18 @@
         <div class="compact-toolbar">
             <!-- Фоны - квадратики -->
             <div class="bg-selector">
-                <button class="bg-btn active" data-bg="green" title="Зеленый (Chroma Key)"
+                <button class="bg-btn active" data-bg="green" title="Зеленый хромакей"
                     style="background: #00ff00;"></button>
-                <button class="bg-btn" data-bg="white" title="Белый"
-                    style="background: #ffffff; border: 1px solid #ddd;"></button>
-                <button class="bg-btn transparent-bg" data-bg="transparent" title="Прозрачный"></button>
-                <button class="bg-btn" data-bg="custom" title="Свое изображение"
-                    style="background: #f0f0f0;">📁</button>
-                <input type="file" id="bg-file" accept="image/*" style="display: none;">
+                <button class="bg-btn" data-bg="transparent" title="Прозрачный">
+                    <div class="transparent-pattern"></div>
+                </button>
+                <button class="bg-btn color-picker-btn" data-bg="color" title="Выбрать цвет">
+                    <input type="color" id="color-picker" value="#1a1a2e" />
+                    <span class="color-icon">🎨</span>
+                </button>
+                <button class="bg-btn" data-bg="white" title="Белый" style="background: white;"></button>
+                <button class="bg-btn" data-bg="custom" title="Своё изображение">📁</button>
+                <input type="file" id="bg-file" accept="image/*" style="display: none;" />
             </div>
 
             <div class="toolbar-divider"></div>
@@ -33,16 +36,8 @@
                 <option value="Aibek" selected>Aibek</option>
             </select>
 
-            <div class="toolbar-divider"></div>
 
-            <!-- Формат видео -->
-            <select id="video-format" class="format-select">
-                <option value="webm">WebM</option>
-                <option value="mp4">MP4 (в разработке)</option>
-                <option value="gif">GIF</option>
-            </select>
-
-            <!-- Качество -->
+            <!-- Quality -->
             <select id="quality-select" class="format-select">
                 <option value="1080">1080p</option>
                 <option value="720" selected>720p</option>
@@ -79,7 +74,30 @@
             <div id="studio-avatar-container" class="avatar-preview">
                 <!-- Video controls overlay -->
                 <div class="video-controls" id="video-controls" style="display: none;">
-                    <button class="play-btn" id="play-btn" title="Воспроизвести">▶</button>
+                    <!-- Timeline -->
+                    <div class="timeline-container">
+                        <div class="timeline" id="timeline">
+                            <div class="timeline-progress" id="timeline-progress"></div>
+                            <div class="timeline-markers" id="timeline-markers"></div>
+                            <div class="timeline-handle" id="timeline-handle"></div>
+                        </div>
+                    </div>
+
+                    <!-- Controls -->
+                    <div class="controls-overlay">
+                        <button class="ctrl-btn" id="play-btn" title="Воспроизвести">▶</button>
+                        <button class="ctrl-btn" id="pause-btn" title="Пауза" style="display: none;">⏸</button>
+
+                        <select class="speed-select" id="speed-select" title="Скорость">
+                            <option value="0.25">0.25x</option>
+                            <option value="0.5">0.5x</option>
+                            <option value="1" selected>1x</option>
+                            <option value="1.5">1.5x</option>
+                            <option value="2">2x</option>
+                        </select>
+
+                        <button class="ctrl-btn" id="loop-btn" title="Зациклить">🔁</button>
+                    </div>
                 </div>
             </div>
         </div>

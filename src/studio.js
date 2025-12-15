@@ -28,9 +28,11 @@ class StudioRecorder {
         this.backgroundType = 'green';
         this.customBackgroundTexture = null;
         this.currentAvatar = CONFIG.defaultAvatar;
-        this.videoFormat = 'webm';
         this.quality = '720';
         this.aspectRatio = '16:9';
+        this.playbackSpeed = 1.0;
+        this.isLooping = false;
+        this.recordedMimeType = null; // Track actual recording format
 
         this.init();
         this.setupUI();
@@ -67,7 +69,7 @@ class StudioRecorder {
         this.animate();
     }
 
-    setBackground(type) {
+    setBackground(type, colorValue = null) {
         this.backgroundType = type;
 
         switch (type) {
@@ -79,6 +81,14 @@ class StudioRecorder {
                 break;
             case 'transparent':
                 this.scene.background = null;
+                break;
+            case 'color':
+                // Используем выбранный цвет
+                if (colorValue) {
+                    this.scene.background = new THREE.Color(colorValue);
+                } else {
+                    this.scene.background = new THREE.Color(0x1a1a2e);
+                }
                 break;
             case 'custom':
                 if (this.customBackgroundTexture) {
@@ -271,6 +281,26 @@ class StudioRecorder {
         });
     }
 
+    getSupportedVideoMimeType() {
+        // Safari supports MP4, Chrome/Firefox support WebM
+        const types = [
+            'video/mp4',
+            'video/webm;codecs=vp9',
+            'video/webm;codecs=vp8',
+            'video/webm'
+        ];
+
+        for (const type of types) {
+            if (MediaRecorder.isTypeSupported(type)) {
+                console.log(`✅ Поддерживаемый формат: ${type}`);
+                return type;
+            }
+        }
+
+        console.warn('⚠️ Не найдено поддерживаемых форматов, используем video/webm');
+        return 'video/webm';
+    }
+
     async startRecording() {
         if (this.isRecording) return;
         if (this.glosses.length === 0) {
@@ -283,25 +313,18 @@ class StudioRecorder {
         this.updateResolution(width, height);
 
         this.recordedChunks = [];
-        const canvas = this.renderer.domElement;
 
-        if (this.videoFormat === 'webm') {
-            await this.recordWebM();
-        } else if (this.videoFormat === 'gif') {
-            await this.recordGIF();
-        } else if (this.videoFormat === 'mp4') {
-            alert('MP4 экспорт в разработке. Используйте WebM.');
-        }
+        // Всегда используем recordVideo() - он автоматически выберет WebM или MP4
+        await this.recordVideo();
     }
 
-    async recordWebM() {
+    async recordVideo() {
         const canvas = this.renderer.domElement;
         const stream = canvas.captureStream(60);
 
-        let mimeType = 'video/webm;codecs=vp9';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = 'video/webm';
-        }
+        // Auto-detect best supported format (MP4 for Safari, WebM for others)
+        const mimeType = this.getSupportedVideoMimeType();
+        this.recordedMimeType = mimeType;
 
         this.mediaRecorder = new MediaRecorder(stream, {
             mimeType: mimeType,
@@ -348,9 +371,7 @@ class StudioRecorder {
         }, 500);
     }
 
-    async recordGIF() {
-        alert('GIF экспорт в разработке. Используйте WebM.');
-    }
+
 
     download() {
         console.log('🔽 Download вызван');
@@ -361,8 +382,14 @@ class StudioRecorder {
             return;
         }
 
-        const blob = new Blob(this.recordedChunks, { type: 'video/webm' });
-        console.log('💾 Blob создан:', blob.size, 'bytes');
+        // Используем реальный MIME type из записи
+        const mimeType = this.recordedMimeType || 'video/webm';
+        const blob = new Blob(this.recordedChunks, { type: mimeType });
+
+        // Определяем расширение по MIME type
+        const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+
+        console.log('💾 Blob создан:', blob.size, 'bytes', blob.type);
 
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -373,7 +400,6 @@ class StudioRecorder {
         const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
         const timeStr = `${String(date.getHours()).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}`;
         const glossesStr = this.glosses.join('_');
-        const extension = this.videoFormat === 'gif' ? 'gif' : 'webm';
 
         a.download = `${glossesStr}_${this.quality}p_${this.aspectRatio.replace(':', 'x')}_${dateStr}_${timeStr}.${extension}`;
 
@@ -422,13 +448,24 @@ class StudioRecorder {
             if (file) this.setCustomBackground(file);
         });
 
+        // Color picker
+        const colorPicker = document.getElementById('color-picker');
+        colorPicker.addEventListener('input', (e) => {
+            const color = e.target.value;
+            this.setBackground('color', color);
+
+            // Активируем кнопку color picker
+            bgButtons.forEach(b => b.classList.remove('active'));
+            document.querySelector('[data-bg="color"]').classList.add('active');
+        });
+
         // Глоссы с превью
         const glossesInput = document.getElementById('glosses-input');
         const glossesPreview = document.getElementById('glosses-preview');
 
         glossesInput.addEventListener('input', (e) => {
-            const text = e.target.value.trim().toUpperCase();
-            // Теперь ищем анимации по точному совпадению (верхний регистр)
+            const text = e.target.value.trim().toLowerCase();
+            // Ищем анимации по точному совпадению (нижний регистр)
             this.glosses = text.split(/\s+/).filter(g => g && CONFIG.animations[g]);
 
             if (this.glosses.length > 0) {
@@ -449,12 +486,6 @@ class StudioRecorder {
             this.currentAvatar = avatarName;
             this.loadModel(CONFIG.avatars[avatarName]);
             console.log(`🔄 Загружен аватар: ${avatarName}`);
-        });
-
-        // Формат видео
-        const videoFormatSelect = document.getElementById('video-format');
-        videoFormatSelect.addEventListener('change', (e) => {
-            this.videoFormat = e.target.value;
         });
 
         // Качество
@@ -493,10 +524,15 @@ class StudioRecorder {
             this.download();
         });
 
-        // Video controls - Play button
+        // Video controls - Play/Pause с timeline
         const playBtn = document.getElementById('play-btn');
-        let isPlaying = false;
+        const pauseBtn = document.getElementById('pause-btn');
 
+        let isPlaying = false;
+        let isPaused = false;
+        let timerInterval = null;
+
+        // Play button
         playBtn.addEventListener('click', async () => {
             if (!this.glosses || this.glosses.length === 0) {
                 alert('Введите глоссы!');
@@ -506,26 +542,288 @@ class StudioRecorder {
             if (isPlaying) return;
 
             isPlaying = true;
-            playBtn.textContent = '⏸';
+            isPaused = false;
 
-            // Воспроизводим все глоссы последовательно
+            // Вычисляем общую длительность
+            let totalDuration = 0;
             for (const gloss of this.glosses) {
-                if (!isPlaying) break;
-                await this.playAnimation(gloss);
+                const clip = await this.loadAnimation(gloss);
+                if (clip) totalDuration += clip.duration;
             }
+            totalDuration += this.glosses.length * 0.3; // Паузы между анимациями
 
+            // Используем реальную длительность из timeline markers
+            totalDuration = this.totalAnimationDuration || totalDuration;
+
+            playBtn.style.display = 'none';
+            pauseBtn.style.display = 'flex';
+
+            // Запускаем обновление timeline
+            let currentAnimIndex = 0;
+
+            timerInterval = setInterval(() => {
+                // Вычисляем прошедшее время через mixer
+                let elapsed = 0;
+                if (this.mixer && this.animationTimestamps) {
+                    const mixerTime = this.mixer.time;
+
+                    // Считаем elapsed по всем анимациям до текущей позиции
+                    for (let i = 0; i < this.animationTimestamps.length; i++) {
+                        if (i < currentAnimIndex) {
+                            elapsed += this.animationTimestamps[i].duration + 0.3;
+                        } else if (i === currentAnimIndex) {
+                            elapsed += Math.min(mixerTime, this.animationTimestamps[i].duration);
+                            break;
+                        }
+                    }
+                }
+
+                // Обновляем только timeline
+                const percent = Math.min((elapsed / totalDuration) * 100, 100);
+                document.getElementById('timeline-progress').style.width = `${percent}%`;
+                document.getElementById('timeline-handle').style.left = `${percent}%`;
+            }, 100);
+
+            // Воспроизводим с поддержкой loop
+            do {
+                // Воспроизводим все глоссы последовательно
+                for (let i = 0; i < this.glosses.length; i++) {
+                    if (!isPlaying || isPaused) break;
+
+                    currentAnimIndex = i; // Обновляем для таймера!
+                    const gloss = this.glosses[i];
+                    await this.playAnimation(gloss);
+
+                    // Применяем скорость
+                    if (this.mixer) {
+                        this.mixer.timeScale = this.playbackSpeed;
+                    }
+
+                    // Пауза между анимациями
+                    if (i < this.glosses.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 300));
+                    }
+                }
+
+                // При loop mixer сам продолжит с начала
+            } while (this.isLooping && isPlaying);
+
+            // Завершение
             isPlaying = false;
-            playBtn.textContent = '▶';
+            playBtn.style.display = 'flex';
+            pauseBtn.style.display = 'none';
+            clearInterval(timerInterval);
+        });
+
+        // Pause button
+        pauseBtn.addEventListener('click', () => {
+            if (!isPlaying) return;
+
+            isPaused = !isPaused;
+
+            if (isPaused) {
+                // Пауза
+                if (this.mixer) {
+                    this.mixer.timeScale = 0;
+                }
+                pauseBtn.textContent = '▶';
+                pauseBtn.title = 'Продолжить';
+            } else {
+                // Продолжить
+                if (this.mixer) {
+                    this.mixer.timeScale = 1;
+                }
+                pauseBtn.textContent = '⏸';
+                pauseBtn.title = 'Пауза';
+            }
         });
 
         // Показываем play button если есть глоссы
         glossesInput.addEventListener('input', () => {
             const videoControls = document.getElementById('video-controls');
             if (this.glosses.length > 0) {
-                videoControls.style.display = 'block';
+                videoControls.style.display = 'flex';
+                this.setupTimelineMarkers();
             } else {
                 videoControls.style.display = 'none';
             }
+        });
+
+        // Speed select
+        const speedSelect = document.getElementById('speed-select');
+        speedSelect.addEventListener('change', (e) => {
+            this.playbackSpeed = parseFloat(e.target.value);
+            if (this.mixer) {
+                this.mixer.timeScale = this.playbackSpeed;
+            }
+            console.log(`⚡ Скорость: ${this.playbackSpeed}x`);
+        });
+
+        // Loop button
+        const loopBtn = document.getElementById('loop-btn');
+        loopBtn.addEventListener('click', () => {
+            this.isLooping = !this.isLooping;
+            loopBtn.classList.toggle('active');
+            console.log(`🔁 Loop: ${this.isLooping ? 'ON' : 'OFF'}`);
+        });
+
+        // Timeline interaction
+        this.setupTimelineInteraction();
+    }
+
+    async setupTimelineMarkers() {
+        const markersContainer = document.getElementById('timeline-markers');
+        markersContainer.innerHTML = '';
+
+        // Загружаем все анимации и вычисляем реальную длительность
+        this.animationTimestamps = [];
+        let cumulativeDuration = 0;
+
+        for (const gloss of this.glosses) {
+            const clip = await this.loadAnimation(gloss);
+            const duration = clip ? clip.duration : 1.0;
+
+            this.animationTimestamps.push({
+                gloss: gloss,
+                startTime: cumulativeDuration,
+                duration: duration,
+                endTime: cumulativeDuration + duration
+            });
+
+            cumulativeDuration += duration + 0.3; // +0.3 сек пауза между анимациями
+        }
+
+        this.totalAnimationDuration = cumulativeDuration;
+
+        // Создаем маркеры на timeline
+        this.animationTimestamps.forEach((anim, index) => {
+            const marker = document.createElement('div');
+            marker.className = 'timeline-marker';
+            marker.dataset.gloss = anim.gloss;
+            marker.dataset.index = index;
+
+            // Позиция маркера по реальному времени
+            const position = (anim.startTime / this.totalAnimationDuration) * 100;
+            marker.style.left = `${position}%`;
+
+            // Клик по маркеру для перемотки
+            marker.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.seekToAnimation(index);
+            });
+
+            markersContainer.appendChild(marker);
+        });
+    }
+
+    async seekToAnimation(index) {
+        console.log(`⏩ Перемотка к анимации: ${this.glosses[index]} (${index})`);
+
+        if (!this.animationTimestamps || index >= this.animationTimestamps.length) {
+            return;
+        }
+
+        const targetAnim = this.animationTimestamps[index];
+
+        // Обновляем визуально timeline
+        const percent = (targetAnim.startTime / this.totalAnimationDuration) * 100;
+        document.getElementById('timeline-progress').style.width = `${percent}%`;
+        document.getElementById('timeline-handle').style.left = `${percent}%`;
+
+        // Останавливаем текущую анимацию
+        if (this.mixer) {
+            this.mixer.stopAllAction();
+        }
+
+        // Воспроизводим с выбранной позиции
+        await this.playAnimationSequence(index);
+    }
+
+    async playAnimationSequence(startIndex = 0) {
+        // Воспроизводим последовательность начиная с startIndex
+        for (let i = startIndex; i < this.glosses.length; i++) {
+            const gloss = this.glosses[i];
+            await this.playAnimation(gloss);
+
+            // Применяем скорость
+            if (this.mixer) {
+                this.mixer.timeScale = this.playbackSpeed;
+            }
+
+            // Пауза между анимациями
+            if (i < this.glosses.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+        }
+    }
+
+    setupTimelineInteraction() {
+        const timeline = document.getElementById('timeline');
+        const timelineProgress = document.getElementById('timeline-progress');
+        const timelineHandle = document.getElementById('timeline-handle');
+        let isDragging = false;
+
+        const updateTimelineVisuals = (percent) => {
+            timelineProgress.style.width = `${percent}%`;
+            timelineHandle.style.left = `${percent}%`;
+        };
+
+        // Click на timeline для перемотки
+        timeline.addEventListener('click', (e) => {
+            const rect = timeline.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const percent = (clickX / rect.width) * 100;
+            const targetTime = (percent / 100) * this.totalAnimationDuration;
+
+            // Находим ближайшую анимацию
+            if (this.animationTimestamps) {
+                for (let i = 0; i < this.animationTimestamps.length; i++) {
+                    const anim = this.animationTimestamps[i];
+                    if (targetTime >= anim.startTime && targetTime <= anim.endTime) {
+                        this.seekToAnimation(i);
+                        return;
+                    }
+                }
+
+                // Если кликнули после последней - перематываем к последней
+                this.seekToAnimation(this.animationTimestamps.length - 1);
+            }
+
+            updateTimelineVisuals(Math.max(0, Math.min(100, percent)));
+        });
+
+        // Drag handle
+        timelineHandle.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+
+            const rect = timeline.getBoundingClientRect();
+            const percent = ((e.clientX - rect.left) / rect.width) * 100;
+            updateTimelineVisuals(Math.max(0, Math.min(100, percent)));
+        });
+
+        document.addEventListener('mouseup', (e) => {
+            if (isDragging) {
+                // При отпускании - seek к этой позиции
+                const rect = timeline.getBoundingClientRect();
+                const percent = ((e.clientX - rect.left) / rect.width) * 100;
+                const targetTime = (percent / 100) * this.totalAnimationDuration;
+
+                if (this.animationTimestamps) {
+                    for (let i = 0; i < this.animationTimestamps.length; i++) {
+                        const anim = this.animationTimestamps[i];
+                        if (targetTime >= anim.startTime && targetTime <= anim.endTime) {
+                            this.seekToAnimation(i);
+                            break;
+                        }
+                    }
+                }
+            }
+            isDragging = false;
         });
     }
 
