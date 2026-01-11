@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { loadVRMModel, disposeVRM } from '../utils/vrm-loader.js';
 import { loadAnimation } from '../utils/animation-loader.js';
+import { JSONAnimationPlayer } from '../utils/json-animation-player.js';
 import { CAMERA_DEFAULTS, RENDERER_DEFAULTS, LIGHTS } from '../utils/constants.js';
 import { CONFIG } from '../config.js';
 import { setupBackgroundControls } from './background-controls.js';
@@ -42,6 +43,9 @@ class StudioRecorder {
         // Timeline
         this.animationTimestamps = [];
         this.totalAnimationDuration = 0;
+
+        // JSON Animation Player
+        this.jsonPlayer = null;
 
         this.init();
         this.setupUI();
@@ -388,6 +392,71 @@ class StudioRecorder {
         if (this.currentVrm) this.currentVrm.update(deltaTime);
         this.renderer.render(this.scene, this.camera);
     }
+
+    /**
+     * Load JSON animation from URL
+     * @param {string} url - URL to JSON animation file
+     * @param {Object} options - Player options
+     * @returns {Promise<boolean>} Success status
+     */
+    async loadJSONAnimation(url, options = {}) {
+        if (!this.currentVrm) {
+            console.error('VRM model not loaded');
+            return false;
+        }
+
+        if (!this.mixer) {
+            console.error('Animation mixer not initialized');
+            return false;
+        }
+
+        // Dispose previous player
+        if (this.jsonPlayer) {
+            this.jsonPlayer.dispose();
+        }
+
+        // Create new player with mixer
+        this.jsonPlayer = new JSONAnimationPlayer(this.currentVrm, this.mixer, {
+            applyPosition: options.applyPosition !== undefined ? options.applyPosition : true,
+            loop: options.loop || this.isLooping
+        });
+
+        // Set callbacks
+        this.jsonPlayer.onComplete = () => {
+            console.log('[Studio] JSON animation completed');
+        };
+
+        return await this.jsonPlayer.loadFromURL(url);
+    }
+
+    /**
+     * Play loaded JSON animation
+     */
+    playJSONAnimation() {
+        if (this.jsonPlayer) {
+            this.jsonPlayer.play();
+        }
+    }
+
+    /**
+     * Pause JSON animation
+     */
+    pauseJSONAnimation() {
+        if (this.jsonPlayer) {
+            this.jsonPlayer.pause();
+        }
+    }
+
+    /**
+     * Stop JSON animation
+     */
+    stopJSONAnimation() {
+        if (this.jsonPlayer) {
+            this.jsonPlayer.stop();
+        }
+    }
 }
 
-new StudioRecorder();
+// Create instance and expose to window for console access
+const studioRecorder = new StudioRecorder();
+window.studioRecorder = studioRecorder;

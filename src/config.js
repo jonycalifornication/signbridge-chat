@@ -24,6 +24,7 @@ export const CONFIG = Object.freeze({
     animations: {
         idle: '/idle.vrma',
         hello: '/some.vrma',
+        alaqan: '/animation.vrma'
     },
 
     camera: {
@@ -46,5 +47,20 @@ export const CONFIG = Object.freeze({
 
     lights: {
         intensity: 1.3,
+    },
+
+    /** Motion capture configuration */
+    mocap: {
+        mediapipe: {
+            modelComplexity: 1,
+            smoothLandmarks: true,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7,
+        },
+        camera: {
+            width: 640,
+            height: 480,
+        },
+        smoothing: 0.5,
     },
 });
