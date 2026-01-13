@@ -165,7 +165,42 @@
                 max-width: 400px;
             }
         }
+
+        #standalone-widget {
+            width: 100%;
+            max-width: 400px;
+        }
+
+
+        .subtitle-overlay {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.85);
+            color: #ffffff;
+            padding: 12px 24px;
+            border-radius: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            font-size: 18px;
+            font-weight: 600;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            max-width: 90%;
+            width: max-content;
+            white-space: pre-wrap;
+            z-index: 100;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        }
+
+        .subtitle-overlay.visible {
+            opacity: 1;
+        }
     </style>
+
 </head>
 
 <body>
@@ -174,46 +209,92 @@
             <h1>👋 SignBridge Avatar Widget</h1>
             <p>Прозрачный виджет сурдопереводчика для встраивания</p>
         </div>
-
         <div class="demo-grid">
             <!-- Виджет -->
             <div class="demo-card">
                 <h2>✨ Демо виджета</h2>
-                <p>Виджет показывает только верхнюю часть тела (до пояса), как профессиональные сурдопереводчики.</p>
-
-                <div class="widget-container">
+                <p>Виджет показывает только верхнюю часть тела (до пояса),
+                    как профессиональные сурдопереводчики.</p>
+                <div class="widget-container" style="position: relative;">
                     <div id="standalone-widget"></div>
+                    <div id="demo-subtitle" class="subtitle-overlay"></div>
                 </div>
-
                 <div class="interactive-demo">
                     <h3>🎭 Попробуйте интерактивность:</h3>
-                    <p style="margin-bottom: 10px;">Выделите слова мышью:</p>
-                    <span class="word-trigger hello">hello</span>
-                    <span class="word-trigger idle">idle</span>
+                    <p style="margin-bottom: 10px;">Выделите слова мышью:</p><span
+                        class="word-trigger hello">hello</span><span class="word-trigger idle">idle</span>
+                    <h3 style="margin-top: 20px;">📜 JSON Control:</h3><textarea id="json-input"
+                        style="width: 100%; height: 150px; margin-bottom: 10px; padding: 10px; border-radius: 8px; border: 1px solid #ddd; background: #fff;">
+
+        {
+  "text": "Сәлем",
+  "speed": 200,
+  "emotions": [
+    {"time": 0, "name": "happy", "value": 1.0},
+    {"time": 0, "name": "blink", "value": 0.0}
+  ]
+}
+
+        </textarea><button id="play-json-btn"
+                        style="padding: 8px 16px; background: #4F46E5; color: white; border: none; border-radius: 6px; cursor: pointer;">▶
+                        Play JSON</button>
+                    <script>document.getElementById('play-json-btn').addEventListener('click', () => {
+                            try {
+                                const json = JSON.parse(document.getElementById('json-input').value);
+
+                                if (window.avatarWidget) {
+                                    // Setup subtitle
+                                    const subtitleEl = document.getElementById('demo-subtitle');
+
+                                    if (json.text) {
+                                        subtitleEl.textContent = json.text;
+                                        subtitleEl.classList.add('visible');
+
+                                        // Auto-hide callback
+                                        window.avatarWidget.onSpeechEnd = () => {
+                                            subtitleEl.classList.remove('visible');
+                                            window.avatarWidget.onSpeechEnd = null; // Cleanup
+                                        }
+
+                                            ;
+                                    }
+
+                                    window.avatarWidget.playFromJSON(json);
+                                }
+
+                                else {
+                                    alert('Widget not ready yet');
+                                }
+                            }
+
+                            catch (e) {
+                                alert('Invalid JSON: ' + e.message);
+                            }
+                        });
+                    </script>
                 </div>
             </div>
-
             <!-- Инструкции -->
             <div class="demo-card">
                 <h2>📦 Как встроить на свой сайт</h2>
                 <p>Скопируйте этот код и вставьте в любое место вашей страницы:</p>
-
-                <div class="code-block">
-                    <span class="comment">&lt;!-- 1. Подключите стили --&gt;</span>
-                    <span class="tag">&lt;link</span> <span class="attr">rel</span>=<span
-                        class="string">"stylesheet"</span> <span class="attr">href</span>=<span
-                        class="string">"/src/main.css"</span><span class="tag">&gt;</span>
-
-                    <span class="comment">&lt;!-- 2. Создайте контейнер --&gt;</span>
-                    <span class="tag">&lt;div</span> <span class="attr">id</span>=<span
-                        class="string">"avatar-widget-container"</span><span class="tag">&gt;&lt;/div&gt;</span>
-
-                    <span class="comment">&lt;!-- 3. Подключите скрипт --&gt;</span>
-                    <span class="tag">&lt;script</span> <span class="attr">type</span>=<span
-                        class="string">"module"</span> <span class="attr">src</span>=<span
-                        class="string">"/src/widget/index.js"</span><span class="tag">&gt;&lt;/script&gt;</span>
-                </div>
-
+                <div class="code-block"><span class="comment"><!-- 1. Подключите стили -->
+                    </span><span class="tag">&lt;
+                        link</span><span class="attr">rel</span>=<span class="string">"stylesheet" </span><span
+                        class="attr">href</span>=<span class="string">"/src/main.css" </span><span class="tag">&gt;
+                        !-- 2. Создайте контейнер --&gt;
+                    </span><span class="tag">&lt;
+                        div</span><span class="attr">id</span>=<span class="string">"avatar-widget-container"
+                    </span><span class="tag">&gt;
+                        &lt;/div&gt;
+                    </span><span class="comment">&lt;
+                        !-- 3. Подключите скрипт --&gt;
+                    </span><span class="tag">&lt;
+                        script</span><span class="attr">type</span>=<span class="string">"module" </span><span
+                        class="attr">src</span>=<span class="string">"/src/widget/index.js" </span><span
+                        class="tag">&gt;
+                        &lt;/script&gt;
+                    </span></div>
                 <h2 style="margin-top: 30px;">⚙️ Основные возможности</h2>
                 <ul style="color: #6B7280; line-height: 2; margin-left: 20px;">
                     <li>✅ Прозрачный фон</li>
@@ -223,35 +304,38 @@
                     <li>✅ Легкая настройка через config.js</li>
                     <li>✅ Поддержка VRM/VRMA форматов</li>
                 </ul>
-
                 <h2 style="margin-top: 30px;">🎨 Настройка положения</h2>
                 <p>Измените CSS для нужного расположения:</p>
+                <div class="code-block" style="font-size: 13px;"><span class="comment">
 
-                <div class="code-block" style="font-size: 13px;">
-                    <span class="comment">/* Правый нижний угол (по умолчанию) */</span>
-                    #avatar-widget-container {
+                        /* Правый нижний угол (по умолчанию) */
+                    </span>#avatar-widget-container {
                     position: fixed;
                     bottom: 20px;
                     right: 20px;
                     }
 
-                    <span class="comment">/* Левый нижний угол */</span>
-                    #avatar-widget-container {
+                    <span class="comment">
+
+                        /* Левый нижний угол */
+                    </span>#avatar-widget-container {
                     position: fixed;
                     bottom: 20px;
                     left: 20px;
                     }
 
-                    <span class="comment">/* Встроенный виджет */</span>
-                    #avatar-widget-container {
+                    <span class="comment">
+
+                        /* Встроенный виджет */
+                    </span>#avatar-widget-container {
                     position: relative;
                     display: inline-block;
                     }
+
                 </div>
             </div>
         </div>
     </div>
-
     <script type="module" src="/src/widget/index.js"></script>
 </body>
 

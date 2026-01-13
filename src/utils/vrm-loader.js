@@ -26,12 +26,23 @@ export async function loadVRMModel(path, config) {
         loader.load(
             path,
             (gltf) => {
+                console.log(`[VRM-Loader] Loaded GLTF: ${path}`);
                 const vrm = gltf.userData.vrm;
+                if (!vrm) {
+                    console.error(`[VRM-Loader] VRM data not found in GLTF: ${path}`);
+                    return;
+                }
+                console.log(`[VRM-Loader] VRM object found. Configuring...`);
                 configureVRM(vrm, config);
                 resolve(vrm);
             },
-            undefined,
-            (error) => reject(error)
+            (progress) => {
+                console.log(`[VRM-Loader] Loading... ${(progress.loaded / progress.total * 100).toFixed(2)}%`);
+            },
+            (error) => {
+                console.error(`[VRM-Loader] Error loading ${path}:`, error);
+                reject(error);
+            }
         );
     });
 }

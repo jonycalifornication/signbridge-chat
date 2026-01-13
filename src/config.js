@@ -12,10 +12,11 @@
  */
 export const CONFIG = Object.freeze({
     defaultAvatar: 'Aibek',
+    speechSpeed: 150, // ms per character (higher = slower)
 
     /** @type {Object.<string, string>} */
     avatars: {
-        'Aidana': '/AINaz.vrm',
+        'Aidana': '/AvatarSample_A.vrm',
         'Ainaz': '/AINaz.vrm',
         'Aibek': '/AliciaSolidmen.vrm',
     },
@@ -25,6 +26,7 @@ export const CONFIG = Object.freeze({
         idle: '/idle.vrma',
         hello: '/some.vrma',
         alaqan: '/animation.vrma'
+
     },
 
     camera: {
@@ -35,8 +37,8 @@ export const CONFIG = Object.freeze({
     },
 
     avatar: {
-        position: { x: 0, y: -0.5, z: 0 },
-        scale: 1.2,
+        position: { x: 0, y: -1, z: 0.75 },
+        scale: 1.4,
     },
 
     widget: {
