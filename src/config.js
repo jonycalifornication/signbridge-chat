@@ -25,7 +25,8 @@ export const CONFIG = Object.freeze({
     animations: {
         idle: '/idle.vrma',
         hello: '/some.vrma',
-        alaqan: '/animation.vrma'
+        alaqan: '/animation.vrma',
+        алақан: "/alaqan.vrma"
 
     },
 
