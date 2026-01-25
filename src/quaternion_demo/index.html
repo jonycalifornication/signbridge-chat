@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avatar Quaternion Visualizer</title>
+    <link rel="stylesheet" href="./style.css">
+
+</head>
+
+<body>
+    <header>
+        <h1>🦴 Quaternion Visualizer</h1>
+        <div class="controls">
+            <div class="select-wrapper">
+                <select id="animation-select">
+                    <option value="" disabled selected>Select animation...</option>
+                </select>
+            </div>
+            <button id="play-pause-btn"
+                style="padding: 0.5rem 1rem; background: var(--primary-color); color: white; border: none; border-radius: 6px; cursor: pointer;">
+                Play
+            </button>
+            <div style="width: 1px; height: 24px; background: #e5e7eb; margin: 0 0.5rem;"></div>
+            <button id="export-frame-btn"
+                style="padding: 0.5rem 1rem; background: white; color: #374151; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer; margin-right: 0.5rem;">
+                ⬇ Frame CSV
+            </button>
+            <button id="export-anim-btn"
+                style="padding: 0.5rem 1rem; background: white; color: #374151; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer;">
+                ⬇ Anim CSV
+            </button>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <!-- Left: 3D View -->
+        <div class="visualizer-section">
+            <div id="canvas-container"></div>
+
+            <div class="timeline-controls">
+                <button id="prev-frame" title="Previous Frame">◀</button>
+                <input type="range" id="animation-slider" min="0" max="100" value="0" step="0.01">
+                <button id="next-frame" title="Next Frame">▶</button>
+                <div id="time-display">00.00 / 00.00</div>
+            </div>
+        </div>
+
+        <!-- Right: Data Table -->
+        <div class="data-section">
+            <div class="data-header">
+                <h2>Bone Quaternions (Local)</h2>
+            </div>
+            <div class="table-container">
+                <table id="quaternion-table">
+                    <thead>
+                        <tr>
+                            <th>Bone Name</th>
+                            <th>X</th>
+                            <th>Y</th>
+                            <th>Z</th>
+                            <th>W</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Rows will be populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script type="module" src="./demo.js"></script>
+</body>
+
+</html>

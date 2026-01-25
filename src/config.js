@@ -16,7 +16,7 @@ export const CONFIG = Object.freeze({
 
     /** @type {Object.<string, string>} */
     avatars: {
-        'Aidana': '/AvatarSample_A.vrm',
+        'Aidana': '/alicia1.0.vrm',
         'Ainaz': '/AINaz.vrm',
         'Aibek': '/AliciaSolidmen.vrm',
     },
@@ -24,10 +24,10 @@ export const CONFIG = Object.freeze({
     /** @type {Object.<string, string>} */
     animations: {
         idle: '/idle.vrma',
-        hello: '/some.vrma',
-        alaqan: '/animation.vrma',
-        алақан: "/alaqan.vrma"
-
+        hello: '/hello.vrma',
+        alaqan: '/alaqan_2.vrma',
+        алақан: "/alaqan.vrma",
+        аурухана: "/аурыхана.vrma"
     },
 
     camera: {
