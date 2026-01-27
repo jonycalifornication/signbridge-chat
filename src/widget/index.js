@@ -9,13 +9,17 @@ import { CONFIG } from '../config.js';
  * Compact avatar widget with text selection trigger
  * @class AvatarWidget
  */
-class AvatarWidget {
+export class AvatarWidget {
     /**
      * Create avatar widget
      * @param {string} containerId - DOM element ID for widget container
      */
     constructor(containerId) {
         this.container = document.getElementById(containerId);
+        if (!this.container) {
+            console.error(`Container #${containerId} not found`);
+            return;
+        }
         this.scene = null;
         this.camera = null;
         this.renderer = null;
@@ -118,36 +122,15 @@ class AvatarWidget {
 
         // Check exact match or contains
         if (CONFIG.animations[selectedText]) {
-            this.showNotification(`🎬 ${selectedText}`);
             this.playAnimation(selectedText);
         } else {
             for (const animName in CONFIG.animations) {
                 if (selectedText.includes(animName)) {
-                    this.showNotification(`🎬 ${animName}`);
                     this.playAnimation(animName);
                     break;
                 }
             }
         }
-    }
-
-    /**
-     * Show notification toast
-     * @param {string} message - Message to display
-     */
-    showNotification(message) {
-        const existing = document.querySelector('.animation-notification');
-        if (existing) existing.remove();
-
-        const notification = document.createElement('div');
-        notification.className = 'animation-notification';
-        notification.textContent = message;
-        document.body.appendChild(notification);
-
-        setTimeout(() => {
-            notification.style.opacity = '0';
-            setTimeout(() => notification.remove(), 300);
-        }, 2000);
     }
 
     /** Setup widget toggle behavior */
@@ -190,19 +173,40 @@ class AvatarWidget {
      * @param {string} name - Avatar name from config
      */
     async loadModelByName(name) {
-        const modelPath = CONFIG.avatars[name];
-        if (!modelPath) {
+        const entry = CONFIG.avatars[name];
+        if (!entry) {
             console.error(`Avatar "${name}" not found in config`);
             return;
         }
-        await this.loadModel(modelPath);
+
+        // Handle String vs Object config
+        let modelPath = entry;
+        let modelConfig = { ...CONFIG };
+
+        if (typeof entry === 'object') {
+            modelPath = entry.path;
+            // Override avatar rotation logic if provided
+            if (entry.rotation !== undefined) {
+                // Deep merge or specific override
+                modelConfig = {
+                    ...CONFIG,
+                    avatar: {
+                        ...CONFIG.avatar,
+                        rotation: entry.rotation
+                    }
+                };
+            }
+        }
+
+        await this.loadModel(modelPath, modelConfig);
     }
 
     /**
      * Load VRM model from path
      * @param {string} modelPath - Path to VRM file
+     * @param {Object} config - Configuration object (optional override)
      */
-    async loadModel(modelPath) {
+    async loadModel(modelPath, config = CONFIG) {
         // Clean up old model
         if (this.currentVrm) {
             this.scene.remove(this.currentVrm.scene);
@@ -213,7 +217,7 @@ class AvatarWidget {
         }
 
         try {
-            this.currentVrm = await loadVRMModel(modelPath, CONFIG);
+            this.currentVrm = await loadVRMModel(modelPath, config);
             this.scene.add(this.currentVrm.scene);
             this.mixer = new THREE.AnimationMixer(this.currentVrm.scene);
             await this.playIdleAnimation();
@@ -289,46 +293,43 @@ class AvatarWidget {
      */
     async playAnimation(name) {
         const url = CONFIG.animations[name];
-        if (!url) {
-            console.error(`Animation "${name}" not found in config`);
-            return;
-        }
-
         const clip = await loadAnimation(url, this.currentVrm, this.animationCache);
         if (!clip) return;
 
-        // Stop previous animation
-        if (this.currentAction?.isRunning()) {
-            this.currentAction.fadeOut(ANIMATION_DEFAULTS.CROSSFADE_DURATION);
-            this.currentAction.stop();
+        const newAction = this.mixer.clipAction(clip);
+
+        // Настройка новой анимации
+        newAction.reset();
+        newAction.setLoop(THREE.LoopOnce);
+        newAction.clampWhenFinished = true;
+        newAction.enabled = true;
+        newAction.setEffectiveWeight(1.0);
+
+        if (this.currentAction) {
+            // Плавный переход от старой к новой
+            newAction.crossFadeFrom(this.currentAction, 0.5, true);
         }
 
-        const action = this.mixer.clipAction(clip);
-        action.reset();
-        action.setLoop(THREE.LoopOnce);
-        action.clampWhenFinished = true;
+        newAction.play();
+        this.currentAction = newAction;
 
-        // Crossfade from idle
-        if (this.idleAction?.isRunning()) {
-            action.crossFadeFrom(this.idleAction, ANIMATION_DEFAULTS.FADE_DURATION, true);
-        }
-
-        action.play();
-        this.currentAction = action;
-
-        // Return to idle when finished
-        if (this.onAnimationFinished) {
-            this.mixer.removeEventListener('finished', this.onAnimationFinished);
-        }
-        this.onAnimationFinished = (e) => {
-            if (e.action === action) {
-                this.currentAction = null;
-                if (this.idleAction) {
-                    this.idleAction.reset().crossFadeFrom(action, ANIMATION_DEFAULTS.FADE_DURATION, true).play();
+        // Ждем окончания
+        return new Promise((resolve) => {
+            const onFinished = (e) => {
+                if (e.action === newAction) {
+                    this.mixer.removeEventListener('finished', onFinished);
+                    // Плавный возврат в Idle
+                    if (this.idleAction) {
+                        this.idleAction.enabled = true;
+                        this.idleAction.setEffectiveWeight(1.0);
+                        this.idleAction.crossFadeFrom(newAction, 0.5, true);
+                        this.idleAction.play();
+                    }
+                    resolve();
                 }
-            }
-        };
-        this.mixer.addEventListener('finished', this.onAnimationFinished);
+            };
+            this.mixer.addEventListener('finished', onFinished);
+        });
     }
 
     /**
@@ -355,7 +356,7 @@ class AvatarWidget {
         if (!this.currentVrm || !this.currentVrm.expressionManager) return;
         if (!this.targetExpressionWeights) return;
 
-        const lerpSpeed = 15.0; // Adjustable smoothing speed
+        const lerpSpeed = 20.0; // Increased for snappier lip-sync
 
         for (const [name, targetValue] of Object.entries(this.targetExpressionWeights)) {
             const currentValue = this.currentVrm.expressionManager.getValue(name);
@@ -398,85 +399,116 @@ class AvatarWidget {
     }
 
     /**
-     * Speak text using lip-sync
+     * set TTS Manager
+     * @param {Object} ttsManager 
+     */
+    setTTSManager(ttsManager) {
+        this.ttsManager = ttsManager;
+    }
+
+    /**
+     * Speak text using lip-sync and audio
      * @param {string} text - Text to speak
      * @param {number} speed - Milliseconds per character
+     * @returns {Promise} Resolves when speech finishes
      */
-    speak(text, speed = 100) {
+    async speak(text, speed = 100) {
         console.log(`[Avatar] Speaking: "${text}"`);
+
         const sequence = textToVisemeSequence(text, speed);
         this.playExpressionSequence(sequence);
+
+        if (this.ttsManager) {
+            return this.ttsManager.speak(text);
+        }
+
+        const lastViseme = sequence[sequence.length - 1];
+        const duration = lastViseme ? lastViseme.time + lastViseme.duration : (text.length * speed);
+        return new Promise(resolve => setTimeout(resolve, duration));
     }
 
     /**
      * Play animation/speech from JSON data
-     * @param {Object} json - { text: string, emotions: Array<{time, name, value}> }
+     * @param {Object|Array} json 
      */
     async playFromJSON(json) {
         if (!json) return;
 
-        // 1. Generate visemes from text
-        let visemeSequence = [];
-        if (json.text) {
-            // Speed: from JSON > CONFIG > default 100ms
-            const speed = json.speed || CONFIG.speechSpeed || 100;
-            visemeSequence = textToVisemeSequence(json.text, speed);
+        if (Array.isArray(json)) {
+            console.log('[Avatar] Playing sequence:', json.length, 'items');
+            for (const item of json) {
+                await this.playFromJSON(item);
+            }
+            return;
         }
 
-        // 2. Process emotions
+        console.log('[Avatar] Playing item:', json);
+
+        let animPromise = Promise.resolve();
+        if (json.animation) {
+            animPromise = this.playAnimation(json.animation);
+        }
+
+        // Generate Expression Events
         const events = [];
+        let speechPromise = Promise.resolve();
 
-        // Add visemes
-        visemeSequence.forEach(v => {
-            events.push({
-                time: v.time,
-                type: 'viseme',
-                name: v.preset,
-                duration: v.duration,
-                value: v.value !== undefined ? v.value : 1.0 // Use generated intensity
-            });
-        });
+        if (json.text) {
+            const speed = json.speed || CONFIG.speechSpeed || 100;
+            const visemes = textToVisemeSequence(json.text, speed);
+            visemes.forEach(v => events.push({
+                time: v.time, type: 'viseme', name: v.preset, duration: v.duration, value: v.value !== undefined ? v.value : 1.0
+            }));
+        }
 
-        // Add explicit emotions
         if (json.emotions && Array.isArray(json.emotions)) {
-            json.emotions.forEach(e => {
-                events.push({
-                    time: e.time,
-                    type: 'emotion',
-                    name: e.name,
-                    value: e.value,
-                    duration: 0
-                });
-            });
+            json.emotions.forEach(e => events.push({
+                time: e.time, type: 'emotion', name: e.name, value: e.value, duration: 0
+            }));
         }
 
-        // Sort by time
         events.sort((a, b) => a.time - b.time);
-
-        this.currentExpressionSequence = events;
-        this.expressionTimer = 0;
-        this.currentExpressionIndex = 0;
-
-        // Reset all expressions
-        if (this.currentVrm?.expressionManager) {
-            ['aa', 'ih', 'ou', 'ee', 'oh', 'neutral', 'happy', 'angry', 'sad', 'relaxed', 'surprised'].forEach(name => {
-                this.setExpression(name, 0);
-            });
+        if (events.length > 0) {
+            this.playExpressionSequence(events);
         }
 
-        console.log('[Avatar] Playing JSON sequence:', events);
+        if (json.text && this.ttsManager) {
+            speechPromise = this.ttsManager.speak(json.text);
+        } else if (json.text) {
+            const lastEvent = events[events.length - 1];
+            const dur = lastEvent ? lastEvent.time + lastEvent.duration : 1000;
+            speechPromise = new Promise(r => setTimeout(r, dur));
+        }
+
+        await Promise.all([animPromise, speechPromise]);
     }
 
     /**
-     * Update expressions based on time (Improved for mixed events)
-     * @param {number} deltaTime - Time since last frame
+     * Play a sequence of expressions/visemes
+     * @param {Array} sequence 
+     */
+    playExpressionSequence(sequence) {
+        this.currentExpressionSequence = sequence;
+        this.expressionTimer = 0;
+        this.currentExpressionIndex = 0;
+
+        if (this.currentVrm?.expressionManager) {
+            ['aa', 'ih', 'ou', 'ee', 'oh', 'neutral', 'happy', 'angry', 'sad', 'relaxed', 'surprised', 'blink'].forEach(name => {
+                this.setExpression(name, 0);
+            });
+            this.setExpression('neutral', 1.0);
+        }
+    }
+
+    /**
+     * Update expressions based on time
+     * @param {number} deltaTime 
      */
     updateExpressions(deltaTime) {
         if (!this.currentExpressionSequence) return;
 
-        this.expressionTimer += deltaTime * 1000; // Convert to ms
+        this.expressionTimer += deltaTime * 1000;
 
-        // Process all events that have happened up to now
         while (this.currentExpressionIndex < this.currentExpressionSequence.length &&
             this.currentExpressionSequence[this.currentExpressionIndex].time <= this.expressionTimer) {
 
@@ -485,7 +517,6 @@ class AvatarWidget {
             this.currentExpressionIndex++;
         }
 
-        // Handle viseme duration expiration
         if (this.currentActiveViseme) {
             if (this.expressionTimer > this.currentActiveViseme.endTime) {
                 this.setExpression(this.currentActiveViseme.name, 0);
@@ -493,20 +524,17 @@ class AvatarWidget {
             }
         }
 
-        // Check if finished
         const lastEvent = this.currentExpressionSequence[this.currentExpressionSequence.length - 1];
         const totalDuration = lastEvent ? lastEvent.time + (lastEvent.duration || 0) + 100 : 0;
 
         if (this.expressionTimer > totalDuration) {
             this.currentExpressionSequence = null;
             this.currentActiveViseme = null;
-            // Back to neutral
             this.setExpression('neutral', 1.0);
             ['aa', 'ih', 'ou', 'ee', 'oh', 'happy', 'angry', 'sad'].forEach(name => {
                 this.setExpression(name, 0);
             });
 
-            // Notify speech ended
             if (this.onSpeechEnd) {
                 this.onSpeechEnd();
             }
@@ -517,12 +545,9 @@ class AvatarWidget {
         if (!this.currentVrm || !this.currentVrm.expressionManager) return;
 
         if (event.type === 'viseme') {
-            // Unset previous viseme
             if (this.currentActiveViseme) {
                 this.setExpression(this.currentActiveViseme.name, 0);
             }
-
-            // Set new viseme
             if (event.name !== 'neutral') {
                 this.setExpression(event.name, event.value);
                 this.currentActiveViseme = {
@@ -531,10 +556,11 @@ class AvatarWidget {
                 };
             }
         } else if (event.type === 'emotion') {
-            // Set emotion value directly
             this.setExpression(event.name, event.value);
         }
     }
+
+
 
     /** Handle window resize */
     onResize() {
@@ -556,11 +582,13 @@ class AvatarWidget {
         const deltaTime = this.clock.getDelta();
 
         // Force neutral pose every frame to ensure it overrides T-Pose
-        this.setNeutralPose();
+        // DISABLED: User requested ONLY VRMA animations. Procedural override fights with animation.
+        // this.setNeutralPose();
 
         if (this.mixer) this.mixer.update(deltaTime);
 
         this.updateBlinking(deltaTime);
+        // this.updateBreathing(deltaTime); // DISABLED: Avoiding interference with VRMA
         this.updateExpressions(deltaTime);
         this.processExpressionSmoothing(deltaTime);
 

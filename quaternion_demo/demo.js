@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { loadVRMModel } from '../utils/vrm-loader.js';
-import { loadAnimation } from '../utils/animation-loader.js';
-import { CONFIG } from '../config.js';
+import { loadVRMModel } from '../src/utils/vrm-loader.js';
+import { loadAnimation } from '../src/utils/animation-loader.js';
+import { CONFIG } from '../src/config.js';
 
 class QuaternionDemo {
     constructor() {

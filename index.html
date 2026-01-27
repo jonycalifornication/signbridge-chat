@@ -1,73 +1,199 @@
 <!DOCTYPE html>
-<html lang="kk">
+<html lang="ru">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SignBridge - Local Dev</title>
-    <link rel="stylesheet" href="/src/main.css">
+    <title>Панель управления SignBridge</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        :root {
+            --primary: #2563eb;
+            --bg-page: #f8f9fa;
+            --bg-card: #ffffff;
+            --text-main: #111827;
+            --text-secondary: #6b7280;
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-page);
+            color: var(--text-main);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .header {
+            text-align: center;
+            margin-top: 60px;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: var(--text-main);
+        }
+
+        .header p {
+            font-size: 16px;
+            color: var(--primary);
+            font-weight: 500;
+        }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            max-width: 1024px;
+            width: 90%;
+            padding: 20px;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 24px;
+            text-decoration: none;
+            color: inherit;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            position: relative;
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+            border-color: #e5e7eb;
+        }
+
+        .icon-box {
+            width: 48px;
+            height: 48px;
+            background: #eff6ff;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 16px;
+            font-size: 24px;
+            color: var(--primary);
+        }
+
+        /* Specific colors for icons */
+        .card:nth-child(1) .icon-box {
+            background: #eff6ff;
+            color: #2563eb;
+        }
+
+        /* Blue */
+        .card:nth-child(2) .icon-box {
+            background: #fef2f2;
+            color: #dc2626;
+        }
+
+        /* Red */
+        .card:nth-child(3) .icon-box {
+            background: #f0fdf4;
+            color: #16a34a;
+        }
+
+        /* Green */
+        .card:nth-child(4) .icon-box {
+            background: #fff7ed;
+            color: #ea580c;
+        }
+
+        /* Orange */
+
+        .card h3 {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0 0 8px 0;
+            color: var(--text-main);
+        }
+
+        .card p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        .badge {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            background: #fee2e2;
+            color: #dc2626;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 4px 8px;
+            border-radius: 9999px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .badge.beta {
+            background: #dbeafe;
+            color: #2563eb;
+        }
+    </style>
 </head>
 
 <body>
 
-    <header>
-        <div class="logo">
-            <span style="font-size: 24px;">👋</span>
-            SignBridge
-        </div>
-        <nav>
-            <a href="#" class="active">Негізгі</a>
-            <a href="#">Сөздік</a>
-            <a href="#">Үйрену</a>
-            <a href="#">KazMorph</a>
-        </nav>
-        <button class="btn-login">➜ Кіру</button>
-    </header>
-
-    <main>
-        <div class="card">
-            <h1>👋 Сәлем!</h1>
-            <p>
-                Менің атым – AlNaz. Бұл портал – есту қабілеті нашар адамдар үшін арнайы жасалған.
-                <br><br>
-                <strong>🎭 Попробуйте интерактивность!</strong>
-                <br>
-                Выделите слова: <span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                                padding: 4px 8px; 
-                                                border-radius: 6px; 
-                                                color: white; 
-                                                font-weight: bold; 
-                                                cursor: pointer;
-                                                user-select: text;">hello</span>
-                или
-                <span style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
-                              padding: 4px 8px; 
-                              border-radius: 6px; 
-                              color: white; 
-                              font-weight: bold; 
-                              cursor: pointer;
-                              user-select: text;">idle</span>
-                чтобы увидеть анимацию аватара!
-            </p>
-            <div class="dots">
-                <div class="dot active"></div>
-                <div class="dot"></div>
-                <div class="dot"></div>
-            </div>
-        </div>
-    </main>
-
-    <div class="bottom-title">
-        <h2>Біздің цифрлық аватарлар</h2>
-        <div class="avatar-selector">
-            <label for="avatar-select">Аватарды таңдаңыз:</label>
-            <select id="avatar-select"></select>
-        </div>
+    <div class="header">
+        <h1>Панель управления SignBridge</h1>
+        <p>Инструменты разработки и тестирования аватара</p>
     </div>
 
-    <div id="avatar-widget-container"></div>
+    <div class="grid-container">
 
-    <script type="module" src="/src/widget/index.js"></script>
+        <!-- Studio -->
+        <a href="studio/" class="card">
+            <div class="icon-box">🎬</div>
+            <h3>Animation Studio</h3>
+            <p>Редактор анимаций VRMA. Настройка таймлайна, блендинг, проверка лип-синка.</p>
+        </a>
+
+        <!-- Widget Demo -->
+        <a href="widget_demo/" class="card">
+            <div class="icon-box">🧩</div>
+            <h3>Widget Demo</h3>
+            <p>Демонстрация интеграции виджета. Проверка TTS и базовых анимаций.</p>
+        </a>
+
+        <!-- Stream Demo -->
+        <a href="stream_demo/" class="card">
+            <span class="badge beta">NEW</span>
+            <div class="icon-box">⚡</div>
+            <h3>Binary Stream</h3>
+            <p>Тестирование бинарного стриминга анимаций. Конвертация VRMA в компактный формат.</p>
+        </a>
+
+        <!-- Quaternion Demo -->
+        <a href="quaternion_demo/" class="card">
+            <span class="badge">DEV</span>
+            <div class="icon-box">🦴</div>
+            <h3>Quaternion Debug</h3>
+            <p>Низкоуровневая отладка вращения костей и проверки осей координат.</p>
+        </a>
+
+    </div>
 
 </body>
 

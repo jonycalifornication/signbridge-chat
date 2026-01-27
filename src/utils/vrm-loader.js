@@ -71,7 +71,32 @@ export function configureVRM(vrm, config) {
     }
 
     // Face camera (180° rotation)
-    vrm.scene.rotation.y = Math.PI;
+    // VRM 0.0 usually needs 180 degree rotation to face +Z.
+    // VRM 1.0 usually faces +Z natively.
+    const isVRM0 = vrm.meta && (vrm.meta.version === '0' || vrm.meta.version === '0.0' || !vrm.meta.version);
+
+    // Check if the metadata suggests it's 1.0 (often indicated by absence of version '0' fields or presence of specific 1.0 meta)
+    // Simple heuristic: If it's V0, rotate. If V1, don't.
+    // However, safest is to default to PI (old behavior) unless it's explicitly 1.0
+
+    // Detecting VRM 1.0 via meta property existence structure
+    // standard three-vrm behavior: vrm.meta (V0) vs vrm.vrm (V1?) 
+    // Actually, newer three-vrm unifies them.
+
+    // Let's assume user works with standard avatars.
+    // We can allow config to override this too.
+
+    let rotation = Math.PI;
+    if (config?.avatar?.rotation !== undefined) {
+        rotation = config.avatar.rotation;
+    } else {
+        // Auto-detect attempt
+        if (vrm.meta?.metaVersion === '1.0' || (vrm.meta?.version && vrm.meta.version.includes('1.0'))) {
+            rotation = 0;
+        }
+    }
+
+    vrm.scene.rotation.y = rotation;
 }
 
 /**

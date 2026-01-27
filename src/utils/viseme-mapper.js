@@ -4,10 +4,10 @@
  */
 const CHAR_TO_VISEME = {
     // A / А -> aa
-    'а': 'aa', 'a': 'aa', 'ә': 'aa', 'я': 'aa',
+    'а': 'aa', 'a': 'aa', 'ә': 'aa', 'я': 'aa', 'h': 'aa',
 
     // I / И / Ы / І -> ih
-    'и': 'ih', 'й': 'ih', 'ы': 'ih', 'і': 'ih', 'i': 'ih', 'e': 'ih',
+    'и': 'ih', 'й': 'ih', 'ы': 'ih', 'і': 'ih', 'i': 'ih', 'e': 'ih', 'y': 'ih',
 
     // U / У / Ұ / Ү / Ю -> ou
     'у': 'ou', 'ұ': 'ou', 'ү': 'ou', 'ю': 'ou', 'u': 'ou', 'w': 'ou',
@@ -18,34 +18,38 @@ const CHAR_TO_VISEME = {
     // O / О / Ө -> oh
     'о': 'oh', 'ө': 'oh', 'o': 'oh',
 
-    // Consonants (mapped to nearest closed shape or neutral)
-    // For many simple lip-syncs, silence or 'ih' (slightly open) or 'ou' (pucker) are used.
-    // We'll leave them as null/neutral or map some to closed lips if available.
-    // VRM doesn't always have a "closed" viseme other than neutral.
-    // We will simulate "M", "B", "P" with 'ou' (briefly) or just neutral.
-    'б': 'ou', 'п': 'ou', 'м': 'ou', 'в': 'ou', 'ф': 'ou',
-    'b': 'ou', 'p': 'ou', 'm': 'ou', 'v': 'ou', 'f': 'ou',
+    // Consonants mappings
+    // M, B, P -> Neutral (Closed Lips) to simulate closure before/after vowels
+    'б': 'neutral', 'п': 'neutral', 'м': 'neutral',
+    'b': 'neutral', 'p': 'neutral', 'm': 'neutral',
 
-    // Dental/Alveolar (Teeth visible): S, Z, D, T, N, L -> ih
+    // F, V -> ih (Teeth visible, slightly open) works better than 'ou' (pucker)
+    'в': 'ih', 'ф': 'ih',
+    'v': 'ih', 'f': 'ih',
+
+    // Dental/Alveolar (Teeth visible): S, Z, D, T, N, L, C -> ih
     'с': 'ih', 'з': 'ih', 'д': 'ih', 'т': 'ih', 'ц': 'ih', 'ч': 'ih', 'щ': 'ih', 'н': 'ih',
-    's': 'ih', 'z': 'ih', 'd': 'ih', 't': 'ih', 'n': 'ih',
+    's': 'ih', 'z': 'ih', 'd': 'ih', 't': 'ih', 'n': 'ih', 'c': 'ih',
 
-    // L, R -> oh (Open but slightly different)
+    // L, R -> oh (Open but slightly different shape)
     'л': 'oh', 'р': 'oh',
     'l': 'oh', 'r': 'oh',
 
-    // Velar (Back of throat): K, G, X -> aa (Open mouth)
+    // Velar/Guttural: K, G, X -> aa (Open mouth often) or ih (if tighter)
+    // Relaxed 'aa' usually fits context of speech
     'к': 'aa', 'г': 'aa', 'х': 'aa', 'ж': 'aa', 'ш': 'aa',
-    'k': 'aa', 'g': 'aa', 'h': 'aa'
+    'k': 'aa', 'g': 'aa', 'x': 'aa', 'j': 'aa'
 };
+
+const VOWELS = new Set(['а', 'a', 'ә', 'я', 'и', 'й', 'ы', 'і', 'i', 'e', 'у', 'ұ', 'ү', 'ю', 'u', 'w', 'е', 'ё', 'э', 'о', 'ө', 'o']);
 
 /**
  * Generate a sequence of visemes from text.
  * @param {string} text - Input text (Russian/Kazakh/English)
- * @param {number} speed - Duration per character in ms
+ * @param {number} baseSpeed - Base duration per character in ms (average)
  * @returns {Array<{preset: string, duration: number, time: number}>} Timeline of visemes
  */
-export function textToVisemeSequence(text, speed = 100) {
+export function textToVisemeSequence(text, baseSpeed = 100) {
     const sequence = [];
     let currentTime = 0;
     const lowerText = text.toLowerCase();
@@ -54,46 +58,58 @@ export function textToVisemeSequence(text, speed = 100) {
         if (char === ' ') {
             sequence.push({
                 preset: 'neutral',
-                duration: speed,
+                duration: baseSpeed * 0.8, // Pauses are slightly shorter than full beat
                 time: currentTime,
                 value: 0
             });
-        } else {
-            // Natural variation: not every mouth movement is 100% open
-            // Vowels usually stronger (0.8 - 1.0), consonants weaker (0.5 - 0.8)
-            let intensity = 0.8 + Math.random() * 0.2;
-
-            if (CHAR_TO_VISEME[char]) {
-                const preset = CHAR_TO_VISEME[char];
-
-                // Consonants like 'm', 'b', 'p' (mapped to 'ou') shouldn't pucker too hard if it's just a closure
-                if (['б', 'п', 'м', 'в', 'ф', 'b', 'p', 'm', 'v', 'f'].includes(char)) {
-                    intensity = 0.5 + Math.random() * 0.3;
-                }
-
-                sequence.push({
-                    preset: preset,
-                    duration: speed,
-                    time: currentTime,
-                    value: intensity
-                });
-            } else {
-                // Unknown character - generic movement
-                sequence.push({
-                    preset: Math.random() > 0.5 ? 'ih' : 'aa',
-                    duration: speed,
-                    time: currentTime,
-                    value: 0.4 + Math.random() * 0.3 // Weaker movement for unknowns
-                });
-            }
+            currentTime += baseSpeed * 0.8;
+            continue;
         }
-        currentTime += speed;
+
+        // Determine if vowel
+        const isVowel = VOWELS.has(char);
+
+        // Calculate Duration
+        // Vowels hold longer (1.2x), Consonants shorter (0.6x) to create rhythm
+        let duration = isVowel ? baseSpeed * 1.5 : baseSpeed * 0.6;
+
+        // Intensity
+        // Vowels are more open (0.7 - 1.0)
+        // Consonants vary. Closed consonants (m, b, p) are 0 intensity (neutral).
+        let intensity = isVowel ? 0.85 : 0.6;
+
+        let preset = CHAR_TO_VISEME[char] || 'aa';
+
+        // Specific overrides
+        if (['б', 'п', 'м', 'b', 'p', 'm'].includes(char)) {
+            preset = 'neutral';
+            intensity = 0;
+            // Duration for closure needs to be perceivable but short
+            duration = baseSpeed * 0.5;
+        }
+
+        // Add randomness for natural jitter (less robotic)
+        // but keep it subtle
+        if (preset !== 'neutral') {
+            intensity += (Math.random() * 0.2 - 0.1); // +/- 0.1
+            if (intensity > 1) intensity = 1;
+            if (intensity < 0.2) intensity = 0.2;
+        }
+
+        sequence.push({
+            preset: preset,
+            duration: duration,
+            time: currentTime,
+            value: intensity
+        });
+
+        currentTime += duration;
     }
 
-    // Return to neutral at the end
+    // Return to neutral slightly after
     sequence.push({
         preset: 'neutral',
-        duration: 100,
+        duration: 200,
         time: currentTime
     });
 

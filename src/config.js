@@ -14,10 +14,9 @@ export const CONFIG = Object.freeze({
     defaultAvatar: 'Aibek',
     speechSpeed: 150, // ms per character (higher = slower)
 
-    /** @type {Object.<string, string>} */
+    /** @type {Object.<string, string|Object>} */
     avatars: {
-        'Aidana': '/alicia1.0.vrm',
-        'Ainaz': '/AINaz.vrm',
+        'Aidana': { path: '/alicia1.0.vrm', rotation: 0 },
         'Aibek': '/AliciaSolidmen.vrm',
     },
 

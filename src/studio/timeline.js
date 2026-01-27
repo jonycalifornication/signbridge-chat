@@ -9,14 +9,27 @@
  * @param {Object} recorder - StudioRecorder instance
  */
 export async function setupTimelineMarkers(recorder) {
+    recorder.timelineGeneration = (recorder.timelineGeneration || 0) + 1;
+    const currentGen = recorder.timelineGeneration;
+
     const markersContainer = document.getElementById('timeline-markers');
     markersContainer.innerHTML = '';
+
+    // Show loading state?
+    // markersContainer.textContent = 'Loading...';
 
     recorder.animationTimestamps = [];
     let cumulativeDuration = 0;
 
     for (const gloss of recorder.glosses) {
+        // If a new generation started, abort this one
+        if (recorder.timelineGeneration !== currentGen) return;
+
         const clip = await recorder.loadAnimation(gloss);
+
+        // Check again after await
+        if (recorder.timelineGeneration !== currentGen) return;
+
         const duration = clip ? clip.duration : 1.0;
 
         recorder.animationTimestamps.push({
@@ -26,7 +39,7 @@ export async function setupTimelineMarkers(recorder) {
             endTime: cumulativeDuration + duration
         });
 
-        cumulativeDuration += duration + 0.3;
+        cumulativeDuration += duration + 0.1; // Reduced padding
     }
 
     recorder.totalAnimationDuration = cumulativeDuration;
@@ -37,7 +50,13 @@ export async function setupTimelineMarkers(recorder) {
         marker.className = 'timeline-marker';
         marker.dataset.gloss = anim.gloss;
         marker.dataset.index = index;
-        marker.style.left = `${(anim.startTime / recorder.totalAnimationDuration) * 100}%`;
+        // Visual positioning
+        const leftPercent = (anim.startTime / recorder.totalAnimationDuration) * 100;
+        const widthPercent = (anim.duration / recorder.totalAnimationDuration) * 100;
+
+        marker.style.left = `${leftPercent}%`;
+        marker.style.width = `${widthPercent}%`; // Visualize duration
+        marker.title = `${anim.gloss} (${anim.duration.toFixed(2)}s)`;
 
         marker.addEventListener('click', () => {
             recorder.seekToAnimation(index);

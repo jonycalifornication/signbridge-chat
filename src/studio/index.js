@@ -23,6 +23,7 @@ class StudioRecorder {
         this.currentVrm = null;
         this.mixer = null;
         this.animationCache = new Map();
+        this.currentAction = null;
 
         // Recording state
         this.glosses = [];
@@ -156,9 +157,9 @@ class StudioRecorder {
 
     /**
      * Load VRM model
-     * @param {string} path - Path to VRM file
+     * @param {string|Object} avatarConfig - Path to VRM file or config object
      */
-    async loadModel(path) {
+    async loadModel(avatarConfig) {
         if (this.currentVrm) {
             this.scene.remove(this.currentVrm.scene);
             disposeVRM(this.currentVrm);
@@ -167,12 +168,39 @@ class StudioRecorder {
 
         this.animationCache.clear();
 
+        // Normalize config
+        let path = avatarConfig;
+        let rotationOverride = null;
+
+        if (typeof avatarConfig === 'object' && avatarConfig !== null) {
+            path = avatarConfig.path;
+            if (avatarConfig.rotation !== undefined) {
+                rotationOverride = avatarConfig.rotation;
+            }
+        }
+
+        if (!path) {
+            console.error('Invalid avatar configuration:', avatarConfig);
+            return;
+        }
+
         try {
+            // Pass the original CONFIG but we might want to override rotation locally
+            // actually vrm-loader uses CONFIG.avatar.rotation by default.
+            // We should apply the specific override if it exists.
+
             this.currentVrm = await loadVRMModel(path, CONFIG);
             this.scene.add(this.currentVrm.scene);
+
+            if (rotationOverride !== null) {
+                this.currentVrm.scene.rotation.y = rotationOverride;
+            }
+
             this.mixer = new THREE.AnimationMixer(this.currentVrm.scene);
+            console.log(`[Studio] Model loaded from ${path}`);
         } catch (error) {
             console.error('Failed to load model:', error);
+            alert(`Failed to load avatar: ${path}`);
         }
     }
 
@@ -182,7 +210,7 @@ class StudioRecorder {
      * @returns {Promise<Object|null>}
      */
     async loadAnimation(animName) {
-        const url = CONFIG.animations[animName];
+        const url = CONFIG.animations[animName.toLowerCase()];
         if (!url) {
             console.error(`Animation "${animName}" not found`);
             return null;
@@ -204,7 +232,23 @@ class StudioRecorder {
         action.reset();
         action.setLoop(THREE.LoopOnce);
         action.clampWhenFinished = true;
+        action.setEffectiveWeight(1.0); // Ensure full weight
+
+        // Smooth transition (Crossfade)
+        if (this.currentAction) {
+            // Restore effective weight of previous action if it faded out?
+            // No, crossFadeFrom handles the weight transfer.
+            // But we must ensure the previous action is still 'active' for the fade to work visually?
+            // If it's finished/clamped, it contributes to the pose.
+
+            action.crossFadeFrom(this.currentAction, 0.5, true);
+        } else {
+            // First animation - maybe fade in from T-pose?
+            action.fadeIn(0.5);
+        }
+
         action.play();
+        this.currentAction = action;
 
         return new Promise((resolve) => {
             const handler = (e) => {
@@ -366,6 +410,23 @@ class StudioRecorder {
 
         // Timeline interaction
         setupTimelineInteraction(this);
+
+        // Theme Toggle
+        const themeBtn = document.getElementById('theme-toggle');
+        if (themeBtn) {
+            // Check saved preference
+            if (localStorage.getItem('theme') === 'dark') {
+                document.body.classList.add('dark');
+                themeBtn.textContent = '☀\uFE0F';
+            }
+
+            themeBtn.addEventListener('click', () => {
+                document.body.classList.toggle('dark');
+                const isDark = document.body.classList.contains('dark');
+                localStorage.setItem('theme', isDark ? 'dark' : 'light');
+                themeBtn.textContent = isDark ? '☀\uFE0F' : '🌙';
+            });
+        }
     }
 
     /** Setup timeline markers - delegated to module */

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Widget Demo & TTS - SignBridge</title>
+    <link rel="stylesheet" href="/src/styles/shared.css">
+    <style>
+        /* Widget specific fixes */
+        #json-input {
+            font-family: monospace;
+            height: 200px;
+            resize: vertical;
+        }
+
+        .preset-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .avatar-area {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f3f4f6;
+        }
+
+        #avatar-container {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <a href="/" class="back-link">← Home</a>
+                <h2 class="sidebar-title">Widget Demo</h2>
+            </div>
+
+            <div class="sidebar-content">
+                <div class="control-group">
+                    <label class="control-label" for="json-input">JSON Command</label>
+                    <textarea id="json-input" class="form-textarea">{
+  "text": "Привет! Как дела?",
+  "animation": "hello",
+  "speed": 100,
+  "emotions": [
+    { "time": 0, "name": "happy", "value": 1.0 },
+    { "time": 2000, "name": "happy", "value": 0.0 }
+  ]
+}</textarea>
+                    <small style="color: var(--text-secondary); font-size: 11px;">"text" field triggers TTS.</small>
+                </div>
+
+                <div class="control-group">
+                    <label class="control-label">Options</label>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="tts-enabled" checked style="width: 16px; height: 16px;">
+                        <label for="tts-enabled" style="font-size: 14px;">Enable TTS Audio</label>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <button id="play-btn" class="btn btn-primary">
+                        ▶ Play Animation
+                    </button>
+                </div>
+
+                <hr style="border: 0; border-top: 1px solid var(--border-color); width: 100%;">
+
+                <div class="control-group">
+                    <label class="control-label">Presets</label>
+                    <div class="preset-grid" style="display: flex; flex-direction: column; gap: 8px;">
+                        <button class="btn btn-secondary preset-btn"
+                            style="justify-content: flex-start; text-align: left;"
+                            data-preset='{"text":"Привет всем!", "animation":"hello", "emotions":[{"time":0,"name":"happy","value":1}]}'>
+                            <span style="font-size: 18px;">👋</span>
+                            <div>
+                                <div style="font-weight: 600;">Hello</div>
+                                <div class="text-sm">Greeting gesture + Happy</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary preset-btn"
+                            style="justify-content: flex-start; text-align: left;"
+                            data-preset='{"text":"Я очень рад вас видеть.", "animation":"idle", "emotions":[{"time":500,"name":"fun","value":1}]}'>
+                            <span style="font-size: 18px;">😊</span>
+                            <div>
+                                <div style="font-weight: 600;">Expressive</div>
+                                <div class="text-sm">Idle + "Fun" emotion</div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content avatar-area">
+            <div id="avatar-container"></div>
+        </main>
+    </div>
+
+    <script type="module" src="./demo.js"></script>
+</body>
+
+</html>

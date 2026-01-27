@@ -14,21 +14,40 @@ export function setupGlossesInput(recorder) {
     const glossesInput = document.getElementById('glosses-input');
     const glossesPreview = document.getElementById('glosses-preview');
     const videoControls = document.getElementById('video-controls');
+    let debounceTimer;
 
     glossesInput.addEventListener('input', (e) => {
-        const text = e.target.value.trim().toLowerCase();
-        recorder.glosses = text.split(/\s+/).filter(g => g && CONFIG.animations[g]);
+        clearTimeout(debounceTimer);
+        const text = e.target.value; // Store raw value to avoid cursor jumps? No, we just read it.
 
-        if (recorder.glosses.length > 0) {
-            glossesPreview.textContent = `✅ Готов к записи: ${recorder.glosses.join(' → ')} (${recorder.glosses.length} анимаций)`;
-            glossesPreview.style.color = '#10b981';
-            videoControls.style.display = 'flex';
-            recorder.setupTimelineMarkers();
-        } else {
-            const availableAnims = Object.keys(CONFIG.animations).join(', ');
-            glossesPreview.textContent = `Введите глоссы (доступные: ${availableAnims})`;
-            glossesPreview.style.color = '#9ca3af';
-            videoControls.style.display = 'none';
-        }
+        debounceTimer = setTimeout(() => {
+            const trimmedText = text.trim().toUpperCase(); // Normalize
+            // Filter valid glosses
+            recorder.glosses = trimmedText.split(/\s+/).filter(g => g && CONFIG.animations[g.toLowerCase()]);
+
+            // Check for potential valid glosses being typed (optional UX improvement)
+            const allWords = trimmedText.split(/\s+/);
+            const validCount = recorder.glosses.length;
+
+            if (validCount > 0) {
+                // Update Preview
+                glossesPreview.innerHTML = ''; // Clear
+
+                // Show recognized badges
+                recorder.glosses.forEach(g => {
+                    const badge = document.createElement('span');
+                    badge.style.cssText = 'background: #d1fae5; color: #065f46; padding: 2px 6px; border-radius: 99px; font-size: 11px; border: 1px solid #34d399;';
+                    badge.textContent = g;
+                    glossesPreview.appendChild(badge);
+                });
+
+                videoControls.style.display = 'block'; // Show controls
+                recorder.setupTimelineMarkers();
+            } else {
+                glossesPreview.textContent = 'Введите известные глоссы (например: HELLO)';
+                glossesPreview.style.color = '#9ca3af';
+                videoControls.style.display = 'none';
+            }
+        }, 600); // 600ms Delay
     });
 }
