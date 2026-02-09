@@ -26,7 +26,13 @@ export const CONFIG = Object.freeze({
         hello: '/hello.vrma',
         alaqan: '/alaqan_2.vrma',
         алақан: "/alaqan.vrma",
-        аурухана: "/аурыхана.vrma"
+        аурухана: "/аурыхана.vrma",
+        aga: "/aga.vrma",
+        ana: "/ana.vrma",
+        сүйек: "/сүйек.vrma",
+        аялдама: "/аялдама.vrma",
+        мектеп: "/мектеп.vrma",
+        театр: "/театр.vrma",
     },
 
     camera: {
