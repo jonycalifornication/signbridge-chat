@@ -48,24 +48,17 @@
                 <div class="control-group">
                     <label class="control-label" for="json-input">JSON Command</label>
                     <textarea id="json-input" class="form-textarea">{
-  "text": "Привет! Как дела?",
   "animation": "hello",
+  "text": "Сәлем",
   "speed": 100,
   "emotions": [
     { "time": 0, "name": "happy", "value": 1.0 },
     { "time": 2000, "name": "happy", "value": 0.0 }
   ]
 }</textarea>
-                    <small style="color: var(--text-secondary); font-size: 11px;">"text" field triggers TTS.</small>
                 </div>
 
-                <div class="control-group">
-                    <label class="control-label">Options</label>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <input type="checkbox" id="tts-enabled" checked style="width: 16px; height: 16px;">
-                        <label for="tts-enabled" style="font-size: 14px;">Enable TTS Audio</label>
-                    </div>
-                </div>
+
 
                 <div class="control-group">
                     <button id="play-btn" class="btn btn-primary">
@@ -80,20 +73,74 @@
                     <div class="preset-grid" style="display: flex; flex-direction: column; gap: 8px;">
                         <button class="btn btn-secondary preset-btn"
                             style="justify-content: flex-start; text-align: left;"
-                            data-preset='{"text":"Привет всем!", "animation":"hello", "emotions":[{"time":0,"name":"happy","value":1}]}'>
+                            data-preset='{"animation":"hello", "text":"Сәлем", "speed":100}'>
                             <span style="font-size: 18px;">👋</span>
                             <div>
                                 <div style="font-weight: 600;">Hello</div>
-                                <div class="text-sm">Greeting gesture + Happy</div>
                             </div>
                         </button>
                         <button class="btn btn-secondary preset-btn"
                             style="justify-content: flex-start; text-align: left;"
-                            data-preset='{"text":"Я очень рад вас видеть.", "animation":"idle", "emotions":[{"time":500,"name":"fun","value":1}]}'>
-                            <span style="font-size: 18px;">😊</span>
+                            data-preset='{"animation":"alaqan", "text":"Алақан", "speed":100}'>
+                            <span style="font-size: 18px;">👐</span>
                             <div>
-                                <div style="font-weight: 600;">Expressive</div>
-                                <div class="text-sm">Idle + "Fun" emotion</div>
+                                <div style="font-weight: 600;">Алақан</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary preset-btn"
+                            style="justify-content: flex-start; text-align: left;"
+                            data-preset='{"animation":"аурухана", "text":"Аурухана", "speed":100}'>
+                            <span style="font-size: 18px;">🏥</span>
+                            <div>
+                                <div style="font-weight: 600;">Аурухана</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary preset-btn"
+                            style="justify-content: flex-start; text-align: left;"
+                            data-preset='{"animation":"aga", "text":"Аға", "speed":100}'>
+                            <span style="font-size: 18px;">👨</span>
+                            <div>
+                                <div style="font-weight: 600;">Аға</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary preset-btn"
+                            style="justify-content: flex-start; text-align: left;"
+                            data-preset='{"animation":"ana", "text":"Ана", "speed":100}'>
+                            <span style="font-size: 18px;">👩</span>
+                            <div>
+                                <div style="font-weight: 600;">Ана</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary preset-btn"
+                            style="justify-content: flex-start; text-align: left;"
+                            data-preset='{"animation":"сүйек", "text":"Сүйек", "speed":100}'>
+                            <span style="font-size: 18px;">🦴</span>
+                            <div>
+                                <div style="font-weight: 600;">Сүйек</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary preset-btn"
+                            style="justify-content: flex-start; text-align: left;"
+                            data-preset='{"animation":"аялдама", "text":"Аялдама", "speed":100}'>
+                            <span style="font-size: 18px;">🚏</span>
+                            <div>
+                                <div style="font-weight: 600;">Аялдама</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary preset-btn"
+                            style="justify-content: flex-start; text-align: left;"
+                            data-preset='{"animation":"мектеп", "text":"Мектеп", "speed":100}'>
+                            <span style="font-size: 18px;">🏫</span>
+                            <div>
+                                <div style="font-weight: 600;">Мектеп</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary preset-btn"
+                            style="justify-content: flex-start; text-align: left;"
+                            data-preset='{"animation":"театр", "text":"Театр", "speed":100}'>
+                            <span style="font-size: 18px;">🎭</span>
+                            <div>
+                                <div style="font-weight: 600;">Театр</div>
                             </div>
                         </button>
                     </div>

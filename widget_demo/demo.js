@@ -1,11 +1,11 @@
 import { AvatarWidget } from '../src/widget/index.js';
-import { tts } from '../src/utils/tts-manager.js';
+
 
 class WidgetDemo {
     constructor() {
         this.jsonInput = document.getElementById('json-input');
         this.playBtn = document.getElementById('play-btn');
-        this.ttsCheckbox = document.getElementById('tts-enabled');
+
         this.widget = null;
 
         this.init();
@@ -38,12 +38,8 @@ class WidgetDemo {
         try {
             const json = JSON.parse(this.jsonInput.value);
 
-            // Configure TTS based on checkbox
-            if (this.ttsCheckbox.checked) {
-                this.widget.setTTSManager(tts);
-            } else {
-                this.widget.setTTSManager(null);
-            }
+            // Play logic without TTS
+            this.widget.setTTSManager(null);
 
             // Play
             this.widget.playFromJSON(json);

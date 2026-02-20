@@ -4,7 +4,7 @@ import { AnimationEncoder } from './animation-encoder.js';
 import { CONFIG } from '../src/config.js';
 import { loadAnimation } from '../src/utils/animation-loader.js';
 import * as THREE from 'three';
-import { tts } from '../src/utils/tts-manager.js';
+
 
 class StreamDemo {
     constructor() {
@@ -149,14 +149,7 @@ class StreamDemo {
                 action.clampWhenFinished = true;
                 action.play();
 
-                // TTS
-                const ttsEnabled = document.getElementById('tts-enabled').checked;
-                if (ttsEnabled && data.text) {
-                    // Simple TTS call
-                    // We need to set TTS manager if not set
-                    if (!this.widget.ttsManager) this.widget.setTTSManager(tts);
-                    this.widget.speak(data.text);
-                }
+
             }
 
         } catch (e) {
