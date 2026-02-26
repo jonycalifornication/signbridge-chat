@@ -55,9 +55,14 @@ describe('Config Module', () => {
         });
 
         it('all avatar paths should be strings', () => {
-            Object.values(CONFIG.avatars).forEach(path => {
-                expect(typeof path).toBe('string');
-                expect(path.length).toBeGreaterThan(0);
+            Object.values(CONFIG.avatars).forEach(entry => {
+                if (typeof entry === 'object') {
+                    expect(typeof entry.path).toBe('string');
+                    expect(entry.path.length).toBeGreaterThan(0);
+                } else {
+                    expect(typeof entry).toBe('string');
+                    expect(entry.length).toBeGreaterThan(0);
+                }
             });
         });
     });

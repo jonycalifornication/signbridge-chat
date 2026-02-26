@@ -11,8 +11,13 @@
  * @readonly
  */
 export const CONFIG = Object.freeze({
-    defaultAvatar: 'Aibek',
+    defaultAvatar: 'Aidana',
     speechSpeed: 150, // ms per character (higher = slower)
+
+    // API settings
+    apiUrl: 'http://localhost:8000/api/v1',
+    apiKey: 'sbk_SXzNm-bPT0S2EsuebMdkDP1Ac2UDDwPJVT8KRJQRz6U', // X-API-Key for signBridgeStorage translate endpoint
+    languageId: 'KSL',
 
     /** @type {Object.<string, string|Object>} */
     avatars: {

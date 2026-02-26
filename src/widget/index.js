@@ -4,6 +4,7 @@ import { textToVisemeSequence } from '../utils/viseme-mapper.js';
 import { loadVRMModel, disposeVRM } from '../utils/vrm-loader.js';
 import { CAMERA_DEFAULTS, ANIMATION_DEFAULTS, RENDERER_DEFAULTS, LIGHTS } from '../utils/constants.js';
 import { CONFIG } from '../config.js';
+import { getDownloadManager } from '../utils/animation-download-manager.js';
 
 /**
  * Compact avatar widget with text selection trigger
@@ -45,6 +46,9 @@ export class AvatarWidget {
 
         // Expose to window for JSON control
         window.avatarWidget = this;
+
+        // Animation download manager for backend VRMA files
+        this.downloadManager = getDownloadManager();
 
         this.init();
         this.setupUI();
@@ -121,12 +125,59 @@ export class AvatarWidget {
     }
 
     /** Process explicit text for animation trigger */
-    processTextSelection(selectedText) {
-        if (!typeof selectedText === 'string' || !selectedText) return;
+    async processTextSelection(selectedText) {
+        if (typeof selectedText !== 'string' || !selectedText) return;
 
         if (!this.isExpanded) this.expand();
 
-        // Check exact match or contains
+        try {
+            console.log(`[Avatar] Requesting translation for: "${selectedText}"`);
+
+            // Use download manager to translate and preload all VRMA files
+            const { response, urls } = await this.downloadManager.translateAndPreload(selectedText);
+
+            if (response.sequence && response.sequence.length > 0) {
+                let playedFromApi = false;
+
+                for (const item of response.sequence) {
+                    if (item.found && item.file_url) {
+                        // Get the local blob URL (already downloaded by preload)
+                        const localUrl = urls.get(item.file_url);
+                        if (localUrl) {
+                            console.log(`[Avatar] Playing preloaded animation for "${item.word}" (${item.gloss_name})`);
+                            await this.playAnimationFromUrl(localUrl);
+                            playedFromApi = true;
+
+                            // Short pause between sequential animations
+                            if (response.sequence.indexOf(item) < response.sequence.length - 1) {
+                                await new Promise(resolve => setTimeout(resolve, ANIMATION_DEFAULTS.PAUSE_BETWEEN_ANIMATIONS));
+                            }
+                        } else {
+                            // Fallback: try loading directly via download manager
+                            console.warn(`[Avatar] Preload missed for "${item.word}", downloading now...`);
+                            try {
+                                const downloadedUrl = await this.downloadManager.getAnimationUrl(item.file_url);
+                                await this.playAnimationFromUrl(downloadedUrl);
+                                playedFromApi = true;
+                            } catch (downloadErr) {
+                                console.error(`[Avatar] Failed to download animation for "${item.word}":`, downloadErr);
+                            }
+                        }
+                    } else {
+                        console.warn(`[Avatar] No animation found for word: "${item.word}"`);
+                    }
+                }
+
+                if (playedFromApi) return;
+            }
+            console.warn('[Avatar] API returned no usable animations, falling back to local config');
+
+        } catch (error) {
+            console.error('[Avatar] Error processing text selection from API:', error);
+            console.warn('[Avatar] Falling back to local config');
+        }
+
+        // Fallback to local config lookup
         if (CONFIG.animations[selectedText]) {
             this.playAnimation(selectedText);
         } else {
@@ -299,7 +350,19 @@ export class AvatarWidget {
      * @param {string} name - Animation name from config
      */
     async playAnimation(name) {
+        if (!CONFIG.animations[name]) {
+            console.error(`[Avatar] Animation "${name}" not found in config`);
+            return;
+        }
         const url = CONFIG.animations[name];
+        return this.playAnimationFromUrl(url);
+    }
+
+    /**
+     * Play animation from direct URL
+     * @param {string} url - Direct URL to VRMA file
+     */
+    async playAnimationFromUrl(url) {
         const clip = await loadAnimation(url, this.currentVrm, this.animationCache);
         if (!clip) return;
 
