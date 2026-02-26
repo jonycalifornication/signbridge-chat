@@ -47,8 +47,28 @@
         window.addEventListener('message', async (event) => {
             if (window.avatarWidget && event.data) {
                 try {
-                    // Ожидаем JSON формат как в playFromJSON
-                    await window.avatarWidget.playFromJSON(event.data);
+                    if (event.data.type === 'TEXT_SELECTION') {
+                        // Pass to the text selection handler logic manually 
+                        // by temporarily overriding selection, or pulling out the logic
+                        // Since we can't easily mock window.getSelection here, 
+                        // let's do a quick lookup over CONFIG
+                        const selectedText = event.data.text;
+                        const CONFIG = window.avatarWidget.constructor.CONFIG || window.CONFIG || { animations: {} };
+
+                        // We need the raw animations object. 
+                        // The easiest way is to let the widget expose a method or 
+                        // just send the word directly as an animation if it exists.
+                        // Let's call a new method on avatarWidget if we add it, or inline the logic:
+                        if (window.avatarWidget.processTextSelection) {
+                            window.avatarWidget.processTextSelection(selectedText);
+                        } else {
+                            // Fallback
+                            await window.avatarWidget.playFromJSON({ animation: selectedText });
+                        }
+                    } else {
+                        // Ожидаем JSON формат как в playFromJSON
+                        await window.avatarWidget.playFromJSON(event.data);
+                    }
                     // Уведомляем родительское окно об окончании анимации
                     window.parent.postMessage({ type: 'AVATAR_ANIMATION_DONE' }, '*');
                 } catch (e) {

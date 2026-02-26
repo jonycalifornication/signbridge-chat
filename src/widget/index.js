@@ -117,6 +117,12 @@ export class AvatarWidget {
     handleTextSelection() {
         const selectedText = window.getSelection().toString().trim().toLowerCase();
         if (!selectedText) return;
+        this.processTextSelection(selectedText);
+    }
+
+    /** Process explicit text for animation trigger */
+    processTextSelection(selectedText) {
+        if (!typeof selectedText === 'string' || !selectedText) return;
 
         if (!this.isExpanded) this.expand();
 
