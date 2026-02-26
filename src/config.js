@@ -22,7 +22,6 @@ export const CONFIG = Object.freeze({
 
     /** @type {Object.<string, string>} */
     animations: {
-        idle: '/idle.vrma',
         hello: '/hello.vrma',
         alaqan: '/alaqan_2.vrma',
         алақан: "/alaqan.vrma",

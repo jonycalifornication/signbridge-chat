@@ -220,7 +220,8 @@ export class AvatarWidget {
             this.currentVrm = await loadVRMModel(modelPath, config);
             this.scene.add(this.currentVrm.scene);
             this.mixer = new THREE.AnimationMixer(this.currentVrm.scene);
-            await this.playIdleAnimation();
+            // playIdleAnimation was missing, we use setNeutralPose instead initially
+            this.setNeutralPose();
         } catch (error) {
             console.error('Failed to load model:', error);
         }

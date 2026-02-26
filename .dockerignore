@@ -4,3 +4,26 @@ node_modules
 Dockerfile
 .dockerignore
 README.md
+
+# Build outputs
+dist
+dist-ssr
+*.local
+
+# Python env and data
+.venv
+.python-version
+uv.lock
+pyproject.toml
+*.zip
+retarget_latest.py
+
+# Demos and tests not needed for build
+tests
+docs
+backend_tools
+fbx_demo
+
+# Other ignored files
+instruction.md
+options.md

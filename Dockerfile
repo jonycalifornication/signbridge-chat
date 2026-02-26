@@ -2,6 +2,9 @@
 FROM node:20-alpine as builder
 WORKDIR /app
 
+# Disable Puppeteer Chromium download to speed up layer caching significantly
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+
 # Install compatibility libraries for Alpine
 RUN apk add --no-cache libc6-compat
 
@@ -9,7 +12,6 @@ RUN apk add --no-cache libc6-compat
 COPY package.json package-lock.json ./
 
 # Install dependencies
-# We use --force to ensure platform-specific binaries are correctly installed
 RUN npm ci
 
 # Copy the rest of the application source code
@@ -25,11 +27,11 @@ WORKDIR /usr/share/nginx/html
 # Remove default nginx page
 RUN rm -rf ./*
 
-# Copy built assets from builder stage
-COPY --from=builder /app/dist .
+# Copy built assets from builder stage with correct permissions
+COPY --chown=nginx:nginx --from=builder /app/dist .
 
-# Set correct permissions for Nginx
-RUN chown -R nginx:nginx /usr/share/nginx/html && chmod -R 755 /usr/share/nginx/html
+# Copy custom nginx config with CORS headers
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Expose port 80
 EXPOSE 80
