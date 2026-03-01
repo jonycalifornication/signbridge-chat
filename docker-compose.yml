@@ -3,4 +3,8 @@ services:
     build: .
     ports:
       - "8080:80"
+    environment:
+      # Backend URL for API proxy (signBridgeStorage)
+      # Change this to the actual backend address
+      - BACKEND_URL=http://host.docker.internal:8000
     restart: always

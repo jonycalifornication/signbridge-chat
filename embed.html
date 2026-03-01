@@ -65,6 +65,14 @@
                             // Fallback
                             await window.avatarWidget.playFromJSON({ animation: selectedText });
                         }
+                    } else if (event.data.action === 'PLAY_TEXT' && event.data.payload) {
+                        // Support for legacy frontends sending { action: "PLAY_TEXT", payload: { text: "..." } }
+                        const selectedText = event.data.payload.text || event.data.payload.animation || '';
+                        if (selectedText && window.avatarWidget.processTextSelection) {
+                            await window.avatarWidget.processTextSelection(selectedText);
+                        } else if (selectedText) {
+                            await window.avatarWidget.playFromJSON({ animation: selectedText });
+                        }
                     } else {
                         // Ожидаем JSON формат как в playFromJSON
                         await window.avatarWidget.playFromJSON(event.data);

@@ -30,11 +30,15 @@ RUN rm -rf ./*
 # Copy built assets from builder stage with correct permissions
 COPY --chown=nginx:nginx --from=builder /app/dist .
 
-# Copy custom nginx config with CORS headers
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy nginx template (will be processed at startup with envsubst)
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+
+# Default backend URL (can be overridden via environment variable)
+ENV BACKEND_URL=http://localhost:8000
 
 # Expose port 80
 EXPOSE 80
 
-# The default nginx command will start the server
-CMD ["nginx", "-g", "daemon off;"]
+# nginx:stable-alpine image automatically processes templates in
+# /etc/nginx/templates/ using envsubst at startup.
+# No custom CMD needed — the default entrypoint handles it.
