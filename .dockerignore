@@ -17,6 +17,7 @@ uv.lock
 pyproject.toml
 *.zip
 retarget_latest.py
+.env
 
 # Demos and tests not needed for build
 tests

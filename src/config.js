@@ -29,7 +29,7 @@ export const CONFIG = Object.freeze({
     /** @type {Object.<string, string|Object>} */
     avatars: {
         'Aidana': { path: '/alicia1.0.vrm', rotation: 0 },
-        'Aibek': '/AliciaSolidmen.vrm',
+        'Aibek': 'https://storage.yandexcloud.kz/signbridge-animations/AliciaSolidfem.vrm',
     },
 
     /** @type {Object.<string, string>} */
