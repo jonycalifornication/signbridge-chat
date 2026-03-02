@@ -17,12 +17,44 @@ const readEnv = (name, fallback = '') => {
     return typeof value === 'string' && value.length > 0 ? value : fallback;
 };
 
+const getModuleOrigin = () => {
+    const moduleUrl = typeof import.meta !== 'undefined' ? import.meta.url : '';
+    if (!moduleUrl.startsWith('http://') && !moduleUrl.startsWith('https://')) {
+        return '';
+    }
+
+    try {
+        return new URL(moduleUrl).origin;
+    } catch {
+        return '';
+    }
+};
+
+const normalizeApiUrl = (value) => {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+
+    // Keep absolute URLs as-is.
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+        return trimmed;
+    }
+
+    // Resolve relative API URLs against widget script origin (not host page origin).
+    if (trimmed.startsWith('/')) {
+        const origin = getModuleOrigin();
+        return origin ? `${origin}${trimmed}` : trimmed;
+    }
+
+    return trimmed;
+};
+
 export const CONFIG = Object.freeze({
     defaultAvatar: 'Aibek',
     speechSpeed: 150, // ms per character (higher = slower)
 
     // API settings (configured via .env / Vite env vars)
-    apiUrl: readEnv('VITE_API_URL', '/api/v1'),
+    apiUrl: normalizeApiUrl(readEnv('VITE_API_URL', '/api/v1')),
     apiKey: readEnv('VITE_API_KEY', ''), // X-API-Key for signBridgeStorage translate endpoint
     languageId: readEnv('VITE_LANGUAGE_ID', 'kz_KSL'),
 
