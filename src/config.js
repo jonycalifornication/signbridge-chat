@@ -10,14 +10,21 @@
  * @property {Object} lights - Lighting configuration
  * @readonly
  */
+const ENV = import.meta.env || {};
+
+const readEnv = (name, fallback = '') => {
+    const value = ENV[name];
+    return typeof value === 'string' && value.length > 0 ? value : fallback;
+};
+
 export const CONFIG = Object.freeze({
     defaultAvatar: 'Aibek',
     speechSpeed: 150, // ms per character (higher = slower)
 
-    // API settings (relative URL — nginx proxies to backend)
-    apiUrl: '/api/v1',
-    apiKey: 'sbk_SXzNm-bPT0S2EsuebMdkDP1Ac2UDDwPJVT8KRJQRz6U', // X-API-Key for signBridgeStorage translate endpoint
-    languageId: 'KSL',
+    // API settings (configured via .env / Vite env vars)
+    apiUrl: readEnv('VITE_API_URL', '/api/v1'),
+    apiKey: readEnv('VITE_API_KEY', ''), // X-API-Key for signBridgeStorage translate endpoint
+    languageId: readEnv('VITE_LANGUAGE_ID', 'kz_KSL'),
 
     /** @type {Object.<string, string|Object>} */
     avatars: {
