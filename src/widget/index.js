@@ -144,8 +144,15 @@ export class AvatarWidget {
                         // Get the local blob URL (already downloaded by preload)
                         const localUrl = urls.get(item.file_url);
                         if (localUrl) {
-                            console.log(`[Avatar] Playing preloaded animation for "${item.word}" (${item.gloss_name})`);
-                            await this.playAnimationFromUrl(localUrl);
+                            // Calculate lip speed from API duration (seconds → ms/char)
+                            const lipSpeed = item.duration
+                                ? (item.duration * 1000) / Math.max(item.word.length, 1)
+                                : 120;
+                            console.log(`[Avatar] Playing preloaded animation for "${item.word}" (${item.gloss_name}), lip speed: ${Math.round(lipSpeed)}ms/char`);
+                            await Promise.all([
+                                this.playAnimationFromUrl(localUrl),
+                                this.speak(item.word, lipSpeed)
+                            ]);
                             playedFromApi = true;
 
                             // Short pause between sequential animations
@@ -157,7 +164,13 @@ export class AvatarWidget {
                             console.warn(`[Avatar] Preload missed for "${item.word}", downloading now...`);
                             try {
                                 const downloadedUrl = await this.downloadManager.getAnimationUrl(item.file_url);
-                                await this.playAnimationFromUrl(downloadedUrl);
+                                const lipSpeed = item.duration
+                                    ? (item.duration * 1000) / Math.max(item.word.length, 1)
+                                    : 120;
+                                await Promise.all([
+                                    this.playAnimationFromUrl(downloadedUrl),
+                                    this.speak(item.word, lipSpeed)
+                                ]);
                                 playedFromApi = true;
                             } catch (downloadErr) {
                                 console.error(`[Avatar] Failed to download animation for "${item.word}":`, downloadErr);
@@ -177,17 +190,19 @@ export class AvatarWidget {
             console.warn('[Avatar] Falling back to local config');
         }
 
-        // Fallback to local config lookup
+        // Fallback to local config lookup + always articulate lips
+        let bodyPromise = Promise.resolve();
         if (CONFIG.animations[selectedText]) {
-            this.playAnimation(selectedText);
+            bodyPromise = this.playAnimation(selectedText);
         } else {
             for (const animName in CONFIG.animations) {
                 if (selectedText.includes(animName)) {
-                    this.playAnimation(animName);
+                    bodyPromise = this.playAnimation(animName);
                     break;
                 }
             }
         }
+        await Promise.all([bodyPromise, this.speak(selectedText, 120)]);
     }
 
     /** Setup widget toggle behavior */
@@ -485,7 +500,16 @@ export class AvatarWidget {
     async speak(text, speed = 100) {
         console.log(`[Avatar] Speaking: "${text}"`);
 
-        const sequence = textToVisemeSequence(text, speed);
+        const rawSequence = textToVisemeSequence(text, speed);
+        // Convert viseme-mapper format {preset} to expression event format {type, name}
+        // that applyExpressionEvent() expects (same conversion as playFromJSON line 529)
+        const sequence = rawSequence.map(v => ({
+            time: v.time,
+            type: 'viseme',
+            name: v.preset,
+            duration: v.duration,
+            value: v.value !== undefined ? v.value : 1.0,
+        }));
         this.playExpressionSequence(sequence);
 
         if (this.ttsManager) {

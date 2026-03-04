@@ -60,7 +60,7 @@
                         // just send the word directly as an animation if it exists.
                         // Let's call a new method on avatarWidget if we add it, or inline the logic:
                         if (window.avatarWidget.processTextSelection) {
-                            window.avatarWidget.processTextSelection(selectedText);
+                            await window.avatarWidget.processTextSelection(selectedText);
                         } else {
                             // Fallback
                             await window.avatarWidget.playFromJSON({ animation: selectedText });
