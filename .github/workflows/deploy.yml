@@ -15,12 +15,17 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout (private repo via PAT)
+      - name: Checkout (private repo via PAT, prod branch)
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.REPO_PAT }}
           ref: prod
           fetch-depth: 1
+
+      - name: Remove git metadata before upload
+        run: |
+          rm -rf .git
+          rm -rf .github || true
 
       - name: Upload project to server
         uses: appleboy/scp-action@v0.1.7
@@ -31,15 +36,7 @@ jobs:
           source: "."
           target: ${{ secrets.SERVER_APP_DIR }}
           overwrite: true
-
-          # игнорируем ненужные файлы
-          exclude: |
-            .git
-            .github
-            node_modules
-            dist
-            .DS_Store
-            *.log
+          rm: true
 
       - name: Deploy on server
         uses: appleboy/ssh-action@v1.2.2
@@ -55,6 +52,7 @@ jobs:
             set -e
             cd "$SERVER_APP_DIR"
 
+            # Запускаем ТОЛЬКО базовый compose (чтобы не подхватился docker-compose.override.yml)
             docker compose -f docker-compose.yml up -d --build --remove-orphans --force-recreate
             docker compose -f docker-compose.yml ps
 
@@ -72,7 +70,6 @@ jobs:
               exit 1
             fi
 
-            # Проверка HTTP
             for i in $(seq 1 20); do
               if curl -fsS http://127.0.0.1:8080 >/dev/null; then
                 echo "OK: http://127.0.0.1:8080 отвечает"
