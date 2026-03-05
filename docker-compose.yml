@@ -2,7 +2,7 @@ services:
   avatar-widget:
     build: .
     ports:
-      - "8080:80"
+      - "5173:80"
     environment:
       # Backend URL for API proxy (signBridgeStorage)
       - BACKEND_URL=http://host.docker.internal:8000
