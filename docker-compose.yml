@@ -1,6 +1,11 @@
 services:
   avatar-widget:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api/v1}
+        VITE_API_KEY: ${VITE_API_KEY:-}
+        VITE_LANGUAGE_ID: ${VITE_LANGUAGE_ID:-kz_KSL}
     ports:
       - "5173:80"
     environment:
