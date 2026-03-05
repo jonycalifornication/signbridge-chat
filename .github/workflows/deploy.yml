@@ -70,14 +70,15 @@ jobs:
               exit 1
             fi
 
+            HEALTHCHECK_URL="http://127.0.0.1:5173"
             for i in $(seq 1 20); do
-              if curl -fsS http://127.0.0.1:8080 >/dev/null; then
-                echo "OK: http://127.0.0.1:8080 отвечает"
+              if curl -fsS "$HEALTHCHECK_URL" >/dev/null; then
+                echo "OK: $HEALTHCHECK_URL отвечает"
                 exit 0
               fi
               sleep 3
             done
 
-            echo "Timeout waiting for http://127.0.0.1:8080"
+            echo "Timeout waiting for $HEALTHCHECK_URL"
             docker compose -f docker-compose.yml logs --no-color --tail=200
             exit 1
