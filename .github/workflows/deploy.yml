@@ -36,7 +36,8 @@ jobs:
           source: "."
           target: ${{ secrets.SERVER_APP_DIR }}
           overwrite: true
-          rm: true
+          # ВАЖНО: rm:true удаляет папку целиком => сносит .env
+          rm: false
 
       - name: Deploy on server
         uses: appleboy/ssh-action@v1.2.2
@@ -51,6 +52,21 @@ jobs:
           script: |
             set -e
             cd "$SERVER_APP_DIR"
+
+            echo "Checking .env..."
+            if [ ! -f .env ]; then
+              echo ".env missing, restoring..."
+              if [ -f .env.backup ]; then
+                cp .env.backup .env
+                echo ".env restored from backup"
+              elif [ -f .env.example ]; then
+                cp .env.example .env
+                echo ".env created from .env.example"
+              else
+                echo "ERROR: no .env, no .env.backup, no .env.example"
+                exit 1
+              fi
+            fi
 
             # Запускаем ТОЛЬКО базовый compose (чтобы не подхватился docker-compose.override.yml)
             docker compose -f docker-compose.yml up -d --build --remove-orphans --force-recreate
