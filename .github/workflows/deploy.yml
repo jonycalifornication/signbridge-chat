@@ -1,0 +1,79 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - prod
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/prod'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout (private repo via PAT)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.REPO_PAT }}
+          ref: prod
+          fetch-depth: 1
+
+      - name: Upload project to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: .
+          target: ${{ secrets.SERVER_APP_DIR }}
+          overwrite: true
+
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          SERVER_APP_DIR: ${{ secrets.SERVER_APP_DIR }}
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: SERVER_APP_DIR
+          command_timeout: 30m
+          script: |
+            set -e
+            cd "$SERVER_APP_DIR"
+
+            # ВАЖНО: запускаем ТОЛЬКО базовый compose, чтобы НЕ подтянулся docker-compose.override.yml (dev)
+            docker compose -f docker-compose.yml up -d --build --remove-orphans --force-recreate
+            docker compose -f docker-compose.yml ps
+
+            # Проверяем контейнер по сервису (без хардкода имени контейнера)
+            CID="$(docker compose -f docker-compose.yml ps -q avatar-widget || true)"
+            if [ -z "$CID" ]; then
+              echo "Container for service 'avatar-widget' not found."
+              docker compose -f docker-compose.yml logs --no-color --tail=200
+              exit 1
+            fi
+
+            STATUS="$(docker inspect -f '{{.State.Status}}' "$CID" 2>/dev/null || true)"
+            if [ "$STATUS" != "running" ]; then
+              echo "Container is not running. Status: $STATUS"
+              docker compose -f docker-compose.yml logs --no-color --tail=200
+              exit 1
+            fi
+
+            # Быстрая HTTP-проверка (на сервере контейнер слушает 8080:80)
+            for i in $(seq 1 20); do
+              if curl -fsS http://127.0.0.1:8080 >/dev/null; then
+                echo "OK: http://127.0.0.1:8080 отвечает"
+                exit 0
+              fi
+              sleep 3
+            done
+
+            echo "Timeout waiting for http://127.0.0.1:8080"
+            docker compose -f docker-compose.yml logs --no-color --tail=200
+            exit 1
