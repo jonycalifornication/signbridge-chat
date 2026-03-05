@@ -15,20 +15,21 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout (private repo via PAT)
+      - name: Checkout (private repo via PAT, prod branch)
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.REPO_PAT }}
           ref: prod
           fetch-depth: 1
 
-      - name: Upload project to server
+      - name: Upload project to server (without .git)
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          source: .
+          # ВАЖНО: не копируем ".", чтобы не тащить .git и не ловить Permission denied
+          source: Dockerfile,docker-compose.yml,package.json,package-lock.json,pnpm-lock.yaml,yarn.lock,vite.config.js,vitest.config.js,index.html,embed.html,src,public,docs,documentation,studio,widget-demo.html,widget_demo,options.md,README.md,instruction.md,headless-renderer.html,mobile_demo,quaternion_demo,stream_demo,test-vr,test-vrma.html,tests,uv.lock,pyproject.toml
           target: ${{ secrets.SERVER_APP_DIR }}
           overwrite: true
 
@@ -46,11 +47,10 @@ jobs:
             set -e
             cd "$SERVER_APP_DIR"
 
-            # ВАЖНО: запускаем ТОЛЬКО базовый compose, чтобы НЕ подтянулся docker-compose.override.yml (dev)
+            # Запускаем ТОЛЬКО базовый compose, чтобы НЕ подхватился docker-compose.override.yml (dev)
             docker compose -f docker-compose.yml up -d --build --remove-orphans --force-recreate
             docker compose -f docker-compose.yml ps
 
-            # Проверяем контейнер по сервису (без хардкода имени контейнера)
             CID="$(docker compose -f docker-compose.yml ps -q avatar-widget || true)"
             if [ -z "$CID" ]; then
               echo "Container for service 'avatar-widget' not found."
@@ -65,7 +65,7 @@ jobs:
               exit 1
             fi
 
-            # Быстрая HTTP-проверка (на сервере контейнер слушает 8080:80)
+            # HTTP check (порт 8080 проброшен на 80 в контейнер)
             for i in $(seq 1 20); do
               if curl -fsS http://127.0.0.1:8080 >/dev/null; then
                 echo "OK: http://127.0.0.1:8080 отвечает"
