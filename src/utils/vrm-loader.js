@@ -60,6 +60,16 @@ export function configureVRM(vrm, config) {
         VRMUtils.combineSkeletons(vrm.scene);
     }
 
+    // Fix for Mobile WebGL bug: disable MToon outlines causing black artifacts
+    if (vrm?.materials) {
+        vrm.materials.forEach((material) => {
+            if (material.isMToonMaterial) {
+                // Remove outlines which break depth buffers on mobile devices
+                material.outlineWidthFactor = 0;
+            }
+        });
+    }
+
     // Attempt to map CC bones if present
     applyCCBoneMapping(vrm);
 
