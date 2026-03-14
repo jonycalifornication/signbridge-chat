@@ -5,6 +5,7 @@ import { loadVRMModel, disposeVRM } from '../utils/vrm-loader.js';
 import { CAMERA_DEFAULTS, ANIMATION_DEFAULTS, RENDERER_DEFAULTS, LIGHTS } from '../utils/constants.js';
 import { CONFIG } from '../config.js';
 import { getDownloadManager } from '../utils/animation-download-manager.js';
+import { logDeviceInfo } from '../utils/device-logger.js';
 
 /**
  * Compact avatar widget with text selection trigger
@@ -50,6 +51,10 @@ export class AvatarWidget {
         // Animation download manager for backend VRMA files
         this.downloadManager = getDownloadManager();
 
+        // UI Loader Overlay
+        this.loaderOverlay = null;
+        this.loaderText = null;
+
         this.init();
         this.setupUI();
         this.setupTextSelection();
@@ -90,6 +95,28 @@ export class AvatarWidget {
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio * 1.5, RENDERER_DEFAULTS.MAX_PIXEL_RATIO));
         this.renderer.domElement.style.display = 'block';
         this.container.appendChild(this.renderer.domElement);
+
+        logDeviceInfo(this.renderer);
+
+        // Setup loading overlay
+        this.loaderOverlay = document.createElement('div');
+        this.loaderOverlay.className = 'avatar-loader-overlay';
+        
+        const loaderSpinner = document.createElement('div');
+        loaderSpinner.className = 'avatar-loader-spinner';
+        
+        this.loaderText = document.createElement('div');
+        this.loaderText.className = 'avatar-loader-text';
+        this.loaderText.innerText = 'Loading Avatar...';
+        
+        this.loaderOverlay.appendChild(loaderSpinner);
+        this.loaderOverlay.appendChild(this.loaderText);
+        
+        // Make sure container is positioned to hold absolute overlay
+        if (window.getComputedStyle(this.container).position === 'static') {
+            this.container.style.position = 'relative';
+        }
+        this.container.appendChild(this.loaderOverlay);
 
         window.addEventListener('resize', () => this.onResize());
         setTimeout(() => this.onResize(), 100);
@@ -291,14 +318,38 @@ export class AvatarWidget {
             this.currentAction = null;
         }
 
+        // Show loader
+        if (this.loaderOverlay) {
+            this.loaderText.innerText = 'Loading Model 0%...';
+            this.loaderOverlay.classList.add('active');
+        }
+
         try {
-            this.currentVrm = await loadVRMModel(modelPath, config);
+            this.currentVrm = await loadVRMModel(modelPath, config, (percent) => {
+                if (this.loaderText) {
+                    this.loaderText.innerText = `Loading Avatar ${percent}%...`;
+                }
+            });
             this.scene.add(this.currentVrm.scene);
             this.mixer = new THREE.AnimationMixer(this.currentVrm.scene);
             // playIdleAnimation was missing, we use setNeutralPose instead initially
             this.setNeutralPose();
+            
+            // Hide loader smoothly
+            setTimeout(() => {
+                if (this.loaderOverlay) {
+                    this.loaderOverlay.classList.remove('active');
+                }
+            }, 300);
         } catch (error) {
             console.error('Failed to load model:', error);
+            if (this.loaderText) {
+                this.loaderText.innerText = `Load Error: ${(error && error.message) ? error.message : error}`;
+                this.loaderText.style.color = '#ef4444';
+                // Increase font size slightly so it's readable
+                this.loaderText.style.fontSize = '12px';
+                this.loaderText.style.textAlign = 'center';
+            }
         }
     }
 

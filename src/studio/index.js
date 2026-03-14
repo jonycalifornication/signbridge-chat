@@ -8,6 +8,7 @@ import { setupBackgroundControls } from './background-controls.js';
 import { setupGlossesInput } from './glosses-input.js';
 import { setupVideoControls } from './video-controls.js';
 import { setupTimelineMarkers, setupTimelineInteraction } from './timeline.js';
+import { logDeviceInfo } from '../utils/device-logger.js';
 
 /**
  * Studio recorder for creating VRM animation videos
@@ -84,6 +85,8 @@ class StudioRecorder {
         this.renderer.setSize(width, height);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio * 1.5, RENDERER_DEFAULTS.MAX_PIXEL_RATIO));
         this.container.appendChild(this.renderer.domElement);
+
+        logDeviceInfo(this.renderer);
 
         this.setBackground('green');
         this.loadModel(CONFIG.avatars[CONFIG.defaultAvatar]);

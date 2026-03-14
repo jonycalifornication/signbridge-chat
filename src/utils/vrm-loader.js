@@ -17,9 +17,10 @@ export function createVRMLoader() {
  * Load a VRM model from path
  * @param {string} path - Path to VRM file
  * @param {Object} config - Configuration object for avatar positioning
+ * @param {Function} [onProgress] - Optional callback for loading progress
  * @returns {Promise<Object>} Promise resolving to VRM object
  */
-export async function loadVRMModel(path, config) {
+export async function loadVRMModel(path, config, onProgress) {
     const loader = createVRMLoader();
 
     return new Promise((resolve, reject) => {
@@ -37,7 +38,10 @@ export async function loadVRMModel(path, config) {
                 resolve(vrm);
             },
             (progress) => {
-                console.log(`[VRM-Loader] Loading... ${(progress.loaded / progress.total * 100).toFixed(2)}%`);
+                const total = progress.total > 0 ? progress.total : (progress.loaded + 1);
+                const percent = progress.total > 0 ? (progress.loaded / progress.total * 100).toFixed(2) : '-';
+                console.log(`[VRM-Loader] Loading... ${progress.loaded} bytes ${percent !== '-' ? `(${percent}%)` : ''}`);
+                if (onProgress) onProgress(percent, progress);
             },
             (error) => {
                 console.error(`[VRM-Loader] Error loading ${path}:`, error);
