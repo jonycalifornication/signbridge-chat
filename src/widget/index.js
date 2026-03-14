@@ -147,7 +147,7 @@ export class AvatarWidget {
                             // Calculate lip speed from API duration (seconds → ms/char)
                             const lipSpeed = item.duration
                                 ? (item.duration * 1000) / Math.max(item.word.length, 1)
-                                : 120;
+                                : 150;
                             console.log(`[Avatar] Playing preloaded animation for "${item.word}" (${item.gloss_name}), lip speed: ${Math.round(lipSpeed)}ms/char`);
                             await Promise.all([
                                 this.playAnimationFromUrl(localUrl),
@@ -166,7 +166,7 @@ export class AvatarWidget {
                                 const downloadedUrl = await this.downloadManager.getAnimationUrl(item.file_url);
                                 const lipSpeed = item.duration
                                     ? (item.duration * 1000) / Math.max(item.word.length, 1)
-                                    : 120;
+                                    : 150;
                                 await Promise.all([
                                     this.playAnimationFromUrl(downloadedUrl),
                                     this.speak(item.word, lipSpeed)
@@ -202,7 +202,7 @@ export class AvatarWidget {
                 }
             }
         }
-        await Promise.all([bodyPromise, this.speak(selectedText, 120)]);
+        await Promise.all([bodyPromise, this.speak(selectedText, 150)]);
     }
 
     /** Setup widget toggle behavior */
@@ -514,7 +514,7 @@ export class AvatarWidget {
      * @param {number} speed - Milliseconds per character
      * @returns {Promise} Resolves when speech finishes
      */
-    async speak(text, speed = 100) {
+    async speak(text, speed = 150) {
         console.log(`[Avatar] Speaking: "${text}"`);
 
         const rawSequence = textToVisemeSequence(text, speed);
@@ -565,7 +565,7 @@ export class AvatarWidget {
         let speechPromise = Promise.resolve();
 
         if (json.text) {
-            const speed = json.speed || CONFIG.speechSpeed || 100;
+            const speed = json.speed || CONFIG.speechSpeed || 150;
             const visemes = textToVisemeSequence(json.text, speed);
             visemes.forEach(v => events.push({
                 time: v.time, type: 'viseme', name: v.preset, duration: v.duration, value: v.value !== undefined ? v.value : 1.0

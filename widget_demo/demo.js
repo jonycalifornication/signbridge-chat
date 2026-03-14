@@ -162,7 +162,7 @@ class WidgetDemo {
                     const presetData = {
                         animation: item.name,
                         text: item.name,
-                        speed: 100
+                        speed: 150
                     };
                     
                     btn.addEventListener('click', () => {
