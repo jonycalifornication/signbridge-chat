@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { loadVRMModel } from '../src/utils/vrm-loader.js';
 import { loadAnimation } from '../src/utils/animation-loader.js';
 import { CONFIG } from '../src/config.js';
+import { getApiClient } from '../src/utils/api-client.js';
 
 class QuaternionDemo {
     constructor() {
@@ -10,6 +11,7 @@ class QuaternionDemo {
         this.slider = document.getElementById('animation-slider');
         this.timeDisplay = document.getElementById('time-display');
         this.select = document.getElementById('animation-select');
+        this.searchInput = document.getElementById('gloss-search');
         this.playPauseBtn = document.getElementById('play-pause-btn');
 
         this.scene = null;
@@ -85,16 +87,19 @@ class QuaternionDemo {
         this.animate();
     }
 
-    initUI() {
-        // Populate Select
-        for (const [name, path] of Object.entries(CONFIG.animations)) {
-            const option = document.createElement('option');
-            option.value = path; // Store path directly
-            option.textContent = name;
-            this.select.appendChild(option);
-        }
+    async initUI() {
+        // Fetch glosses logic
+        this.fetchGlosses(''); // Initial load without search
 
-        this.select.addEventListener('change', (e) => this.loadAnimation(e.target.value));
+        let debounceTimer;
+        this.searchInput.addEventListener('input', (e) => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                this.fetchGlosses(e.target.value.trim());
+            }, 300);
+        });
+
+        this.select.addEventListener('change', (e) => this.handleGlossSelection(e.target.value));
 
         // Slider logic
         this.slider.addEventListener('input', (e) => {
@@ -122,6 +127,56 @@ class QuaternionDemo {
         // Export controls
         document.getElementById('export-frame-btn').addEventListener('click', () => this.exportFrameCSV());
         document.getElementById('export-anim-btn').addEventListener('click', () => this.exportAnimationCSV());
+    }
+
+    loadLocalAnimationsFallback() {
+        // Fallback to local configuration if API fails
+        this.select.innerHTML = '<option value="" disabled selected>Select local fallback...</option>';
+        for (const [name, path] of Object.entries(CONFIG.animations)) {
+            const option = document.createElement('option');
+            option.value = "LOCAL:" + path; 
+            option.textContent = name + " (Local Fallback)";
+            this.select.appendChild(option);
+        }
+    }
+
+    async fetchGlosses(searchQuery = '') {
+        const apiClient = getApiClient();
+        try {
+            const url = searchQuery 
+                ? `${apiClient.baseUrl}/cms/glosses?search=${encodeURIComponent(searchQuery)}&limit=100`
+                : `${apiClient.baseUrl}/cms/glosses?limit=100`;
+
+            const response = await fetch(url, {
+                headers: apiClient._getHeaders()
+            });
+
+            if (response.ok) {
+                const glosses = await response.json();
+                this.select.innerHTML = ''; // Clear previous options
+                
+                if (glosses.length === 0) {
+                     this.select.innerHTML = '<option value="" disabled>No results found</option>';
+                     return;
+                }
+                
+                // Sort glosses alphabetically
+                glosses.sort((a, b) => a.name.localeCompare(b.name));
+                
+                for (const gloss of glosses) {
+                    const option = document.createElement('option');
+                    option.value = gloss.name;
+                    option.textContent = gloss.name;
+                    this.select.appendChild(option);
+                }
+            } else {
+                console.error("Failed to fetch glosses, status:", response.status);
+                this.loadLocalAnimationsFallback();
+            }
+        } catch (error) {
+            console.error("Error fetching glosses:", error);
+            this.loadLocalAnimationsFallback();
+        }
     }
 
     updatePlayButton() {
@@ -390,6 +445,42 @@ class QuaternionDemo {
 
             node.add(this.selectedBoneHelper);
             console.log(`Selected bone (enhanced): ${boneName}`);
+        }
+    }
+
+    async handleGlossSelection(selection) {
+        if (!this.currentVrm || !selection) return;
+
+        // Determine if local fallback was selected
+        if (selection.startsWith("LOCAL:")) {
+            const localPath = selection.substring(6);
+            return this.loadAnimation(localPath);
+        }
+
+        console.log('Fetching animation for gloss:', selection);
+        this.select.disabled = true;
+
+        try {
+            const apiClient = getApiClient();
+            const response = await apiClient.translate(selection);
+            
+            if (response && response.sequence && response.sequence.length > 0) {
+                const seq = response.sequence[0];
+                if (seq.found && seq.file_url) {
+                    const blobUrl = await apiClient.getVRMABlobUrl(seq.file_url);
+                    await this.loadAnimation(blobUrl);
+                } else {
+                    console.warn("Animation not found for gloss", selection);
+                    alert("No animation file for this gloss.");
+                }
+            } else {
+                alert("Translation failed or returned empty sequence.");
+            }
+        } catch (e) {
+            console.error("Exception loading gloss animation", e);
+            alert("Error loading animation: " + e.message);
+        } finally {
+            this.select.disabled = false;
         }
     }
 

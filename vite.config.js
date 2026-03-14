@@ -7,7 +7,7 @@ export default defineConfig({
     proxy: {
       // Proxy API requests to backend in dev mode
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://94.131.83.85:8000',
         changeOrigin: true,
       }
     }

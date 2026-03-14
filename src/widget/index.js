@@ -362,15 +362,32 @@ export class AvatarWidget {
 
     /**
      * Play named animation
-     * @param {string} name - Animation name from config
+     * @param {string} name - Animation name or gloss
      */
     async playAnimation(name) {
-        if (!CONFIG.animations[name]) {
-            console.error(`[Avatar] Animation "${name}" not found in config`);
-            return;
+        // Try local config first
+        if (CONFIG.animations[name]) {
+            return this.playAnimationFromUrl(CONFIG.animations[name]);
         }
-        const url = CONFIG.animations[name];
-        return this.playAnimationFromUrl(url);
+
+        // Try backend if not found locally
+        console.log(`[Avatar] Animation "${name}" not found in config, querying backend...`);
+        try {
+            const { getApiClient } = await import('../utils/api-client.js');
+            const apiClient = getApiClient();
+            
+            const response = await apiClient.translate(name);
+            if (response && response.sequence && response.sequence.length > 0) {
+                const seq = response.sequence[0];
+                if (seq.found && seq.file_url) {
+                    const blobUrl = await apiClient.getVRMABlobUrl(seq.file_url);
+                    return this.playAnimationFromUrl(blobUrl);
+                }
+            }
+            console.error(`[Avatar] Animation for "${name}" not found on backend either.`);
+        } catch (e) {
+            console.error(`[Avatar] Backend query failed for "${name}":`, e);
+        }
     }
 
     /**
