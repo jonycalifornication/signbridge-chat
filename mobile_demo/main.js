@@ -120,15 +120,31 @@ class MobileAvatarApp {
 
         // Renderer
         this.renderer = new THREE.WebGLRenderer({
-            alpha: true,
-            antialias: true,
+            alpha: RENDERER_DEFAULTS.ALPHA,
+            antialias: RENDERER_DEFAULTS.ANTIALIAS,
             powerPreference: 'high-performance',
+            precision: 'highp',
         });
+        // Keep output in sRGB to avoid device-specific dark/black shading on mobile Chrome.
+        this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         this.renderer.setSize(width, height);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this.renderer.setPixelRatio(
+            Math.min(window.devicePixelRatio || 1, 1.5, RENDERER_DEFAULTS.MAX_PIXEL_RATIO)
+        );
         this.renderer.domElement.style.display = 'block';
         this.renderer.domElement.style.touchAction = 'none';
         this.container.appendChild(this.renderer.domElement);
+
+        this.renderer.domElement.addEventListener('webglcontextlost', (event) => {
+            event.preventDefault();
+            console.warn('[MobileDemo] WebGL context lost');
+            this.showToast('Графика временно недоступна', 'error');
+        });
+
+        this.renderer.domElement.addEventListener('webglcontextrestored', () => {
+            console.info('[MobileDemo] WebGL context restored');
+            this.showToast('Графика восстановлена', 'success');
+        });
 
         window.addEventListener('resize', () => this.onResize());
         setTimeout(() => this.onResize(), 50);
@@ -154,6 +170,13 @@ class MobileAvatarApp {
             }
 
             this.currentVrm = await loadVRMModel(modelPath, modelConfig);
+            this.currentVrm.scene.traverse((obj) => {
+                if (!obj.isMesh || !obj.material) return;
+                const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+                materials.forEach((material) => {
+                    material.needsUpdate = true;
+                });
+            });
             this.scene.add(this.currentVrm.scene);
             this.mixer = new THREE.AnimationMixer(this.currentVrm.scene);
             this.setNeutralPose();
