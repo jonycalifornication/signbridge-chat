@@ -80,6 +80,7 @@ class StudioRecorder {
             preserveDrawingBuffer: true,
             powerPreference: 'high-performance'
         });
+        this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         this.renderer.setSize(width, height);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio * 1.5, RENDERER_DEFAULTS.MAX_PIXEL_RATIO));
         this.container.appendChild(this.renderer.domElement);

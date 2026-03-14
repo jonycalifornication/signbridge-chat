@@ -83,6 +83,9 @@ export class AvatarWidget {
             antialias: RENDERER_DEFAULTS.ANTIALIAS,
             powerPreference: 'high-performance'
         });
+        
+        // Fix for dark/black models on mobile: explicitly set standard color space
+        this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         this.renderer.setSize(width, height);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio * 1.5, RENDERER_DEFAULTS.MAX_PIXEL_RATIO));
         this.renderer.domElement.style.display = 'block';
