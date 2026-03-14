@@ -99,6 +99,7 @@ body {
     color: var(--text-main);
     letter-spacing: -0.02em;
     background: linear-gradient(135deg, #111827 0%, #4B5563 100%);
+    background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }
@@ -373,6 +374,7 @@ body.dark .canvas-container {
 
 body.dark .sidebar-title {
     background: linear-gradient(135deg, #60A5FA 0%, #A78BFA 100%);
+    background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }

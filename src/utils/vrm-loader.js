@@ -61,11 +61,20 @@ export function configureVRM(vrm, config) {
     }
 
     // Fix for Mobile WebGL bug: disable MToon outlines causing black artifacts
-    if (vrm?.materials) {
-        vrm.materials.forEach((material) => {
-            if (material.isMToonMaterial) {
-                // Remove outlines which break depth buffers on mobile devices
-                material.outlineWidthFactor = 0;
+    if (vrm?.scene) {
+        vrm.scene.traverse((obj) => {
+            if (obj.isMesh && obj.material) {
+                const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+                materials.forEach(m => {
+                    if (m.isMToonMaterial || m.type === 'MToonMaterial' || m.name.includes('Outline')) {
+                        // Remove outlines which break depth buffers on mobile devices
+                        m.outlineWidthFactor = 0;
+                        if (m.userData && m.userData.outlineWidthMode) {
+                            m.userData.outlineWidthMode = 'none';
+                        }
+                        m.needsUpdate = true;
+                    }
+                });
             }
         });
     }
