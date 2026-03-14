@@ -32,6 +32,54 @@
             width: 100%;
             height: 100%;
         }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        details > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        /* Mobile Typography & Layout Adaptation */
+        @media (max-width: 768px) {
+            .app-container {
+                display: flex !important;
+                flex-direction: column-reverse !important;
+                height: 100dvh;
+            }
+            
+            .sidebar {
+                width: 100% !important;
+                height: 55dvh !important;
+                max-height: 55dvh !important;
+                border-top: 1px solid var(--border-light);
+                border-right: none !important;
+                border-bottom: none !important;
+                padding: 16px !important;
+            }
+
+            .avatar-area {
+                width: 100%;
+                height: 45dvh !important;
+                flex: none !important;
+                background: linear-gradient(135deg, #e0e7ff 0%, #f3e8ff 100%);
+            }
+            
+            #json-input {
+                height: 120px; /* Shorter textarea on mobile */
+            }
+            
+            .preset-category summary {
+                padding: 10px 12px !important;
+                font-size: 13px !important;
+            }
+
+            .preset-grid {
+                grid-template-columns: 1fr; /* Make preset buttons full width inside mobile */
+            }
+        }
     </style>
 </head>
 

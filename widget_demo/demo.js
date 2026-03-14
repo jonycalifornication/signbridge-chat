@@ -170,6 +170,8 @@ class WidgetDemo {
                         // Add a little click animation
                         btn.style.transform = 'scale(0.96)';
                         setTimeout(() => btn.style.transform = 'scale(1)', 150);
+                        // Automatically play the animation
+                        this.play();
                     });
                     
                     grid.appendChild(btn);
