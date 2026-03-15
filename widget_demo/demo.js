@@ -30,7 +30,6 @@ class WidgetDemo {
         // But our demo.html has "avatar-container". So index.js did NOT create one.
 
         this.widget = new AvatarWidget('avatar-container');
-        this.widget.setPlaybackRate(1.5);
         this.apiClient = getApiClient();
 
         // Event Listeners
