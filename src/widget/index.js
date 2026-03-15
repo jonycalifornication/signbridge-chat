@@ -32,6 +32,7 @@ export class AvatarWidget {
         this.idleAction = null;
         this.currentAction = null;
         this.isExpanded = false;
+        this.playbackRate = 1;
 
         // Expression state
         this.currentExpressionSequence = null;
@@ -59,6 +60,33 @@ export class AvatarWidget {
         this.setupUI();
         this.setupTextSelection();
         this.setupWidgetToggle();
+    }
+
+    /**
+     * Set playback speed multiplier for body animation and lip-sync
+     * @param {number} rate
+     */
+    setPlaybackRate(rate) {
+        const nextRate = Number(rate);
+        this.playbackRate = Number.isFinite(nextRate) && nextRate > 0 ? nextRate : 1;
+    }
+
+    /**
+     * Get current playback speed multiplier
+     * @returns {number}
+     */
+    getPlaybackRate() {
+        return this.playbackRate || 1;
+    }
+
+    /**
+     * Delay scaled by playback rate
+     * @param {number} ms
+     * @returns {Promise<void>}
+     */
+    waitScaled(ms) {
+        const scaledMs = Math.max(0, ms / this.getPlaybackRate());
+        return new Promise((resolve) => setTimeout(resolve, scaledMs));
     }
 
     /** Initialize 3D scene */
@@ -217,7 +245,7 @@ export class AvatarWidget {
             ]);
 
             if (index < letters.length - 1) {
-                await new Promise((resolve) => setTimeout(resolve, ANIMATION_DEFAULTS.PAUSE_BETWEEN_ANIMATIONS));
+                await this.waitScaled(ANIMATION_DEFAULTS.PAUSE_BETWEEN_ANIMATIONS);
             }
         }
     }
@@ -269,7 +297,7 @@ export class AvatarWidget {
             }
 
             if (index < sequence.length - 1) {
-                await new Promise((resolve) => setTimeout(resolve, ANIMATION_DEFAULTS.PAUSE_BETWEEN_ANIMATIONS));
+                await this.waitScaled(ANIMATION_DEFAULTS.PAUSE_BETWEEN_ANIMATIONS);
             }
         }
     }
@@ -499,6 +527,7 @@ export class AvatarWidget {
         newAction.clampWhenFinished = true;
         newAction.enabled = true;
         newAction.setEffectiveWeight(1.0);
+        newAction.setEffectiveTimeScale(this.getPlaybackRate());
 
         if (this.currentAction) {
             // Плавный переход от старой к новой
@@ -610,7 +639,9 @@ export class AvatarWidget {
     async speak(text, speed = 150) {
         console.log(`[Avatar] Speaking: "${text}"`);
 
-        const rawSequence = textToVisemeSequence(text, speed);
+        const effectiveSpeed = speed / this.getPlaybackRate();
+
+        const rawSequence = textToVisemeSequence(text, effectiveSpeed);
         // Convert viseme-mapper format {preset} to expression event format {type, name}
         // that applyExpressionEvent() expects (same conversion as playFromJSON line 529)
         const sequence = rawSequence.map(v => ({
@@ -627,7 +658,7 @@ export class AvatarWidget {
         }
 
         const lastViseme = sequence[sequence.length - 1];
-        const duration = lastViseme ? lastViseme.time + lastViseme.duration : (text.length * speed);
+        const duration = lastViseme ? lastViseme.time + lastViseme.duration : (text.length * effectiveSpeed);
         return new Promise(resolve => setTimeout(resolve, duration));
     }
 

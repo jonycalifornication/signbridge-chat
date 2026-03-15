@@ -11,7 +11,7 @@ const SENTENCE_EXAMPLES = [
 
 class WidgetDemo {
     constructor() {
-        this.jsonInput = document.getElementById('json-input');
+        this.textInput = document.getElementById('text-input');
         this.playBtn = document.getElementById('play-btn');
 
         this.widget = null;
@@ -30,10 +30,17 @@ class WidgetDemo {
         // But our demo.html has "avatar-container". So index.js did NOT create one.
 
         this.widget = new AvatarWidget('avatar-container');
+        this.widget.setPlaybackRate(1.5);
         this.apiClient = getApiClient();
 
         // Event Listeners
         this.playBtn.addEventListener('click', () => this.play());
+        this.textInput.addEventListener('keydown', (event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault();
+                this.play();
+            }
+        });
 
         // Presets container
         this.presetsContainer = document.getElementById('presets-container');
@@ -168,13 +175,11 @@ class WidgetDemo {
                     });
                     
                     const presetData = {
-                        animation: item.name,
-                        text: item.name,
-                        speed: 150
+                        text: item.name
                     };
                     
                     btn.addEventListener('click', () => {
-                        this.jsonInput.value = JSON.stringify(presetData, null, 2);
+                        this.textInput.value = presetData.text;
                         // Add a little click animation
                         btn.style.transform = 'scale(0.96)';
                         setTimeout(() => btn.style.transform = 'scale(1)', 150);
@@ -315,18 +320,12 @@ class WidgetDemo {
     }
 
     async loadSentenceExample(sentence, button) {
+        this.textInput.value = sentence;
         button.style.transform = 'scale(0.96)';
         button.disabled = true;
 
         try {
-            const response = await this.apiClient.translate(sentence);
-            this.jsonInput.value = JSON.stringify(response, null, 2);
-            await this.play();
-        } catch (error) {
-            console.warn('Failed to load sentence example from API, using fallback sequence:', error);
-            const fallback = this.createFallbackTranslateResponse(sentence);
-            this.jsonInput.value = JSON.stringify(fallback, null, 2);
-            await this.play();
+            await this.play(sentence);
         } finally {
             setTimeout(() => {
                 button.style.transform = 'scale(1)';
@@ -359,47 +358,32 @@ class WidgetDemo {
         };
     }
 
-    isTranslateRequest(json) {
-        return !Array.isArray(json) && typeof json?.translate === 'string';
-    }
+    async play(inputText = null) {
+        const text = typeof inputText === 'string'
+            ? inputText.trim()
+            : this.textInput.value.trim();
 
-    isTranslateResponse(json) {
-        return !Array.isArray(json) && typeof json?.text === 'string' && Array.isArray(json?.sequence);
-    }
+        if (!text) {
+            alert('Введите текст.');
+            return;
+        }
 
-    async play() {
         try {
-            const json = JSON.parse(this.jsonInput.value);
-
-            // Play logic without TTS
             this.widget.setTTSManager(null);
+            this.textInput.value = text;
 
-            if (this.isTranslateRequest(json)) {
-                let response;
-
-                try {
-                    response = await this.apiClient.translate(json.translate.trim());
-                } catch (error) {
-                    console.warn('Translate request failed, using fallback sequence:', error);
-                    response = this.createFallbackTranslateResponse(json.translate.trim());
-                }
-
-                this.jsonInput.value = JSON.stringify(response, null, 2);
-                await this.widget.playTranslateResponse(response);
-                return;
+            let response;
+            try {
+                response = await this.apiClient.translate(text);
+            } catch (error) {
+                console.warn('Translate request failed, using fallback sequence:', error);
+                response = this.createFallbackTranslateResponse(text);
             }
 
-            if (this.isTranslateResponse(json)) {
-                await this.widget.playTranslateResponse(json);
-                return;
-            }
-
-            // Play
-            await this.widget.playFromJSON(json);
-
+            await this.widget.playTranslateResponse(response);
         } catch (e) {
-            console.error('Failed to play JSON command:', e);
-            alert('Unable to play command. Check console.');
+            console.error('Failed to play input text:', e);
+            alert('Не удалось проиграть текст. Проверьте консоль.');
         }
     }
 }
