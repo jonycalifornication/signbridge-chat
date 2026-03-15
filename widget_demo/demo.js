@@ -1,5 +1,6 @@
 import { AvatarWidget } from '../src/widget/index.js';
 import { getApiClient } from '../src/utils/api-client.js';
+import { CONFIG } from '../src/config.js';
 
 const SENTENCE_EXAMPLES = [
     'Алма дәмді.',
@@ -29,6 +30,7 @@ class WidgetDemo {
         // But our demo.html has "avatar-container". So index.js did NOT create one.
 
         this.widget = new AvatarWidget('avatar-container');
+        this.apiClient = getApiClient();
 
         // Event Listeners
         this.playBtn.addEventListener('click', () => this.play());
@@ -43,9 +45,8 @@ class WidgetDemo {
         this.renderSentenceExamples();
 
         try {
-            const apiClient = getApiClient();
-            const response = await fetch(`${apiClient.baseUrl}/cms/glosses?limit=500`, {
-                headers: apiClient._getHeaders()
+            const response = await fetch(`${this.apiClient.baseUrl}/cms/glosses?limit=500`, {
+                headers: this.apiClient._getHeaders()
             });
 
             if (!response.ok) {
@@ -292,12 +293,7 @@ class WidgetDemo {
             });
 
             btn.addEventListener('click', () => {
-                this.jsonInput.value = JSON.stringify({
-                    translate: sentence
-                }, null, 2);
-                btn.style.transform = 'scale(0.96)';
-                setTimeout(() => btn.style.transform = 'scale(1)', 150);
-                this.play();
+                this.loadSentenceExample(sentence, btn);
             });
 
             grid.appendChild(btn);
@@ -318,6 +314,59 @@ class WidgetDemo {
         this.presetsContainer.appendChild(error);
     }
 
+    async loadSentenceExample(sentence, button) {
+        button.style.transform = 'scale(0.96)';
+        button.disabled = true;
+
+        try {
+            const response = await this.apiClient.translate(sentence);
+            this.jsonInput.value = JSON.stringify(response, null, 2);
+            await this.play();
+        } catch (error) {
+            console.warn('Failed to load sentence example from API, using fallback sequence:', error);
+            const fallback = this.createFallbackTranslateResponse(sentence);
+            this.jsonInput.value = JSON.stringify(fallback, null, 2);
+            await this.play();
+        } finally {
+            setTimeout(() => {
+                button.style.transform = 'scale(1)';
+                button.disabled = false;
+            }, 150);
+        }
+    }
+
+    createFallbackTranslateResponse(sentence) {
+        const sequence = sentence
+            .split(/\s+/)
+            .map((word) => word.trim().replace(/^[^0-9A-Za-z\u0400-\u04FF]+|[^0-9A-Za-z\u0400-\u04FF]+$/g, ''))
+            .filter(Boolean)
+            .map((word) => ({
+                word: word.toLowerCase(),
+                text: word.toLowerCase(),
+                gloss_name: null,
+                type: null,
+                file_url: null,
+                duration: null,
+                transition_in: null,
+                transition_out: null,
+                found: false
+            }));
+
+        return {
+            text: sentence,
+            language_id: this.apiClient.languageId || CONFIG.languageId,
+            sequence
+        };
+    }
+
+    isTranslateRequest(json) {
+        return !Array.isArray(json) && typeof json?.translate === 'string';
+    }
+
+    isTranslateResponse(json) {
+        return !Array.isArray(json) && typeof json?.text === 'string' && Array.isArray(json?.sequence);
+    }
+
     async play() {
         try {
             const json = JSON.parse(this.jsonInput.value);
@@ -325,8 +374,23 @@ class WidgetDemo {
             // Play logic without TTS
             this.widget.setTTSManager(null);
 
-            if (!Array.isArray(json) && typeof json?.translate === 'string') {
-                await this.widget.processTextSelection(json.translate.trim().toLowerCase());
+            if (this.isTranslateRequest(json)) {
+                let response;
+
+                try {
+                    response = await this.apiClient.translate(json.translate.trim());
+                } catch (error) {
+                    console.warn('Translate request failed, using fallback sequence:', error);
+                    response = this.createFallbackTranslateResponse(json.translate.trim());
+                }
+
+                this.jsonInput.value = JSON.stringify(response, null, 2);
+                await this.widget.playTranslateResponse(response);
+                return;
+            }
+
+            if (this.isTranslateResponse(json)) {
+                await this.widget.playTranslateResponse(json);
                 return;
             }
 
@@ -334,8 +398,8 @@ class WidgetDemo {
             await this.widget.playFromJSON(json);
 
         } catch (e) {
-            console.error('Invalid JSON:', e);
-            alert('Invalid JSON! Check console.');
+            console.error('Failed to play JSON command:', e);
+            alert('Unable to play command. Check console.');
         }
     }
 }

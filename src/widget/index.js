@@ -167,51 +167,8 @@ export class AvatarWidget {
             const { response, urls } = await this.downloadManager.translateAndPreload(selectedText);
 
             if (response.sequence && response.sequence.length > 0) {
-                let playedFromApi = false;
-
-                for (const item of response.sequence) {
-                    if (item.found && item.file_url) {
-                        // Get the local blob URL (already downloaded by preload)
-                        const localUrl = urls.get(item.file_url);
-                        if (localUrl) {
-                            // Calculate lip speed from API duration (seconds → ms/char)
-                            const lipSpeed = item.duration
-                                ? (item.duration * 1000) / Math.max(item.word.length, 1)
-                                : 150;
-                            console.log(`[Avatar] Playing preloaded animation for "${item.word}" (${item.gloss_name}), lip speed: ${Math.round(lipSpeed)}ms/char`);
-                            await Promise.all([
-                                this.playAnimationFromUrl(localUrl),
-                                this.speak(item.word, lipSpeed)
-                            ]);
-                            playedFromApi = true;
-
-                            // Short pause between sequential animations
-                            if (response.sequence.indexOf(item) < response.sequence.length - 1) {
-                                await new Promise(resolve => setTimeout(resolve, ANIMATION_DEFAULTS.PAUSE_BETWEEN_ANIMATIONS));
-                            }
-                        } else {
-                            // Fallback: try loading directly via download manager
-                            console.warn(`[Avatar] Preload missed for "${item.word}", downloading now...`);
-                            try {
-                                const downloadedUrl = await this.downloadManager.getAnimationUrl(item.file_url);
-                                const lipSpeed = item.duration
-                                    ? (item.duration * 1000) / Math.max(item.word.length, 1)
-                                    : 150;
-                                await Promise.all([
-                                    this.playAnimationFromUrl(downloadedUrl),
-                                    this.speak(item.word, lipSpeed)
-                                ]);
-                                playedFromApi = true;
-                            } catch (downloadErr) {
-                                console.error(`[Avatar] Failed to download animation for "${item.word}":`, downloadErr);
-                            }
-                        }
-                    } else {
-                        console.warn(`[Avatar] No animation found for word: "${item.word}"`);
-                    }
-                }
-
-                if (playedFromApi) return;
+                await this.playTranslateResponse(response, urls);
+                return;
             }
             console.warn('[Avatar] API returned no usable animations, falling back to local config');
 
@@ -233,6 +190,88 @@ export class AvatarWidget {
             }
         }
         await Promise.all([bodyPromise, this.speak(selectedText, 150)]);
+    }
+
+    /**
+     * Split missing text into letter animations (finger spelling fallback)
+     * @param {string} text
+     * @param {number} speed
+     */
+    async playTextAsLetters(text, speed = CONFIG.speechSpeed || 150) {
+        const letters = Array.from((text || '').toLowerCase())
+            .filter((char) => /[0-9A-Za-z\u0400-\u04FF]/.test(char));
+
+        if (letters.length === 0) {
+            if (text) {
+                await this.speak(text, speed);
+            }
+            return;
+        }
+
+        console.log(`[Avatar] Falling back to letter animations for "${text}"`);
+
+        for (const [index, letter] of letters.entries()) {
+            await Promise.all([
+                this.playAnimation(letter),
+                this.speak(letter, speed)
+            ]);
+
+            if (index < letters.length - 1) {
+                await new Promise((resolve) => setTimeout(resolve, ANIMATION_DEFAULTS.PAUSE_BETWEEN_ANIMATIONS));
+            }
+        }
+    }
+
+    /**
+     * Play a translate API response, using letter-by-letter fallback for missing words
+     * @param {Object} response
+     * @param {Map<string, string>} [preloadedUrls]
+     */
+    async playTranslateResponse(response, preloadedUrls = null) {
+        const sequence = Array.isArray(response?.sequence) ? response.sequence : [];
+
+        if (sequence.length === 0) {
+            if (response?.text) {
+                await this.speak(response.text, CONFIG.speechSpeed || 150);
+            }
+            return;
+        }
+
+        for (const [index, item] of sequence.entries()) {
+            const spokenText = item?.text || item?.word || '';
+            const lipSpeed = item?.duration
+                ? (item.duration * 1000) / Math.max(spokenText.length, 1)
+                : (CONFIG.speechSpeed || 150);
+
+            if (item?.found && item?.file_url) {
+                let animationUrl = preloadedUrls?.get(item.file_url) || null;
+
+                if (!animationUrl) {
+                    try {
+                        animationUrl = await this.downloadManager.getAnimationUrl(item.file_url);
+                    } catch (downloadErr) {
+                        console.error(`[Avatar] Failed to download animation for "${item.word || spokenText}":`, downloadErr);
+                    }
+                }
+
+                if (animationUrl) {
+                    console.log(`[Avatar] Playing animation for "${item.word || spokenText}" (${item.gloss_name || 'direct'})`);
+                    await Promise.all([
+                        this.playAnimationFromUrl(animationUrl),
+                        this.speak(spokenText, lipSpeed)
+                    ]);
+                } else if (spokenText) {
+                    await this.playTextAsLetters(spokenText, lipSpeed);
+                }
+            } else if (spokenText) {
+                console.warn(`[Avatar] No animation found for word: "${item.word || spokenText}". Falling back to letters.`);
+                await this.playTextAsLetters(spokenText, lipSpeed);
+            }
+
+            if (index < sequence.length - 1) {
+                await new Promise((resolve) => setTimeout(resolve, ANIMATION_DEFAULTS.PAUSE_BETWEEN_ANIMATIONS));
+            }
+        }
     }
 
     /** Setup widget toggle behavior */
