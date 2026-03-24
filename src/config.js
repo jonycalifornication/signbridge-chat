@@ -58,6 +58,12 @@ export const CONFIG = Object.freeze({
     apiKey: readEnv('VITE_API_KEY', ''), // X-API-Key for signBridgeStorage translate endpoint
     languageId: readEnv('VITE_LANGUAGE_ID', 'kz_KSL'),
 
+    // Telegram Error Logging config
+    telegram: {
+        botToken: readEnv('VITE_TG_BOT_TOKEN', '8723076091:AAGpkQwerwh_lubAJKO7C8IZdCUM6PkQneY'),
+        chatId: readEnv('VITE_TG_CHAT_ID', '-5133993969')
+    },
+
     /** @type {Object.<string, string|Object>} */
     avatars: {
         'Aidana': { path: '/alicia1.0.vrm', rotation: 0 },

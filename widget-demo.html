@@ -244,10 +244,30 @@
   ]
 }
 
-        </textarea><button id="play-json-btn"
-                        style="padding: 8px 16px; background: #4F46E5; color: white; border: none; border-radius: 6px; cursor: pointer;">▶
-                        Play JSON</button>
-                    <script>document.getElementById('play-json-btn').addEventListener('click', () => {
+        </textarea>
+        <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between;">
+            <div style="display: flex; gap: 10px;">
+                <button id="play-json-btn"
+                    style="padding: 8px 16px; background: #4F46E5; color: white; border: none; border-radius: 6px; cursor: pointer;">▶
+                    Play JSON</button>
+                <button id="download-video-btn"
+                    style="padding: 8px 16px; background: #10B981; color: white; border: none; border-radius: 6px; cursor: pointer;">📹
+                    Download Video</button>
+            </div>
+            
+            <div style="display: flex; gap: 15px; background: #f3f4f6; padding: 8px 12px; border-radius: 6px;">
+                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 14px;">
+                    <input type="checkbox" id="hd-video-opt" checked> HD Quality
+                </label>
+                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 14px;">
+                    <input type="color" id="bg-color-opt" value="#00ff00" style="width: 20px; height: 20px; padding: 0; border: none; border-radius: 3px;"> Background
+                </label>
+                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 14px;">
+                    <input type="checkbox" id="use-bg-opt" checked> Use Bg
+                </label>
+            </div>
+        </div>
+        <script>document.getElementById('play-json-btn').addEventListener('click', () => {
                             try {
                                 const json = JSON.parse(document.getElementById('json-input').value);
 
@@ -274,10 +294,46 @@
                                 else {
                                     alert('Widget not ready yet');
                                 }
-                            }
-
-                            catch (e) {
+                            } catch (e) {
                                 alert('Invalid JSON: ' + e.message);
+                            }
+                        });
+
+
+                        document.getElementById('download-video-btn').addEventListener('click', async () => {
+                            if (!window.avatarWidget) return;
+                            
+                            const btn = document.getElementById('download-video-btn');
+                            const originalText = btn.innerHTML;
+                            btn.innerHTML = '⏳ Recording...';
+                            btn.disabled = true;
+                            
+                            try {
+                                const json = JSON.parse(document.getElementById('json-input').value);
+                                const textToPlay = json.text || 'Сәлем';
+                                
+                                const isHd = document.getElementById('hd-video-opt').checked;
+                                const useBg = document.getElementById('use-bg-opt').checked;
+                                const bgColor = useBg ? document.getElementById('bg-color-opt').value : null;
+                                    
+                                const blob = await window.avatarWidget.exportVideo(textToPlay, {
+                                    hd: isHd,
+                                    background: bgColor
+                                });
+                                
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = `avatar_sign.webm`;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                URL.revokeObjectURL(url);
+                            } catch (err) {
+                                alert('Recording failed: ' + err.message);
+                            } finally {
+                                btn.innerHTML = originalText;
+                                btn.disabled = false;
                             }
                         });
                     </script>

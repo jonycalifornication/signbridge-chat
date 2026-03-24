@@ -7,6 +7,7 @@ import { CONFIG } from '../config.js';
 import { getDownloadManager } from '../utils/animation-download-manager.js';
 import { logDeviceInfo } from '../utils/device-logger.js';
 import { createRestPoseClip } from '../utils/rest-pose.js';
+import { initGlobalErrorLogger, sendErrorToTelegram } from '../utils/telegram-logger.js';
 
 /**
  * Compact avatar widget with text selection trigger
@@ -18,6 +19,8 @@ export class AvatarWidget {
      * @param {string} containerId - DOM element ID for widget container
      */
     constructor(containerId) {
+        initGlobalErrorLogger(); // Initialize Telegram error listener
+        
         this.container = document.getElementById(containerId);
         if (!this.container) {
             console.error(`Container #${containerId} not found`);
@@ -204,6 +207,7 @@ export class AvatarWidget {
 
         } catch (error) {
             console.error('[Avatar] Error processing text selection from API:', error);
+            sendErrorToTelegram(error, `AvatarWidget - Text Selection API: "${selectedText}"`);
             console.warn('[Avatar] Falling back to local config');
         }
 
@@ -281,6 +285,7 @@ export class AvatarWidget {
                         animationUrl = await this.downloadManager.getAnimationUrl(item.file_url);
                     } catch (downloadErr) {
                         console.error(`[Avatar] Failed to download animation for "${item.word || spokenText}":`, downloadErr);
+                        sendErrorToTelegram(downloadErr, `AvatarWidget - Download Animation: "${item.word || spokenText}"`);
                     }
                 }
 
@@ -347,6 +352,7 @@ export class AvatarWidget {
         const entry = CONFIG.avatars[name];
         if (!entry) {
             console.error(`Avatar "${name}" not found in config`);
+            sendErrorToTelegram(new Error(`Avatar "${name}" not found in config`), 'AvatarWidget - Load Model By Name');
             return;
         }
 
@@ -423,6 +429,7 @@ export class AvatarWidget {
             }, 300);
         } catch (error) {
             console.error('Failed to load model:', error);
+            sendErrorToTelegram(error, `AvatarWidget - Load Model (${modelPath})`);
             if (this.loaderText) {
                 this.loaderText.innerText = `Load Error: ${(error && error.message) ? error.message : error}`;
                 this.loaderText.style.color = '#ef4444';
@@ -532,8 +539,10 @@ export class AvatarWidget {
                 }
             }
             console.error(`[Avatar] Animation for "${name}" not found on backend either.`);
+            sendErrorToTelegram(new Error(`Animation not found: ${name}`), 'AvatarWidget - Animation Lookup');
         } catch (e) {
             console.error(`[Avatar] Backend query failed for "${name}":`, e);
+            sendErrorToTelegram(e, `AvatarWidget - Backend Query (${name})`);
         }
     }
 
@@ -841,6 +850,116 @@ export class AvatarWidget {
     }
 
 
+
+    /**
+     * Start capturing the canvas to a WebM video
+     * @param {Object} options - Recording options
+     * @param {number} [options.fps=30] - Frames per second
+     * @param {number} [options.bitrate=8000000] - Video bitrate (8Mbps default for high quality)
+     */
+    startRecording(options = {}) {
+        if (!this.renderer || !this.renderer.domElement) return;
+        
+        const fps = options.fps || 30;
+        const bitrate = options.bitrate || 8000000;
+        
+        const stream = this.renderer.domElement.captureStream(fps);
+        this.recordedChunks = [];
+        this.recorder = new MediaRecorder(stream, { 
+            mimeType: 'video/webm;codecs=vp9',
+            videoBitsPerSecond: bitrate
+        });
+        
+        this.recorder.ondataavailable = (e) => {
+            if (e.data.size > 0) this.recordedChunks.push(e.data);
+        };
+        
+        this.recorder.start();
+        console.log(`[Avatar] Recording started (FPS: ${fps}, Bitrate: ${bitrate / 1000000} Mbps)`);
+    }
+
+    /**
+     * Stop capturing and return the video Blob
+     * @returns {Promise<Blob>}
+     */
+    stopRecording() {
+        return new Promise((resolve, reject) => {
+            if (!this.recorder || this.recorder.state === 'inactive') {
+                return reject(new Error('Recorder is not active'));
+            }
+            
+            this.recorder.onstop = () => {
+                const blob = new Blob(this.recordedChunks, { type: 'video/webm' });
+                this.recordedChunks = [];
+                console.log('[Avatar] Recording stopped, blob size:', blob.size);
+                resolve(blob);
+            };
+            
+            this.recorder.stop();
+        });
+    }
+
+    /**
+     * Record a specific text animation sequence to a video file
+     * @param {string} text - The text to animate
+     * @param {Object} [options] - Export options
+     * @param {boolean} [options.hd=false] - Temporarily scale canvas to 1280x720 for crisp recording
+     * @param {string} [options.background=null] - CSS color for background (e.g. '#00ff00' for green screen)
+     * @returns {Promise<Blob>} The recorded WebM video blob
+     */
+    async exportVideo(text, options = {}) {
+        // Save original state
+        const originalWidth = this.container.clientWidth;
+        const originalHeight = this.container.clientHeight;
+        const originalClearColor = new THREE.Color();
+        this.renderer.getClearColor(originalClearColor);
+        const originalClearAlpha = this.renderer.getClearAlpha();
+        const originalBodyBg = document.body.style.backgroundColor;
+
+        // Apply HD resolution if requested
+        if (options.hd) {
+            console.log('[Avatar] Upscaling to HD for recording...');
+            this.renderer.setSize(1280, 720);
+            this.camera.aspect = 1280 / 720;
+            this.camera.updateProjectionMatrix();
+        }
+
+        // Apply custom background if requested
+        if (options.background) {
+            document.body.style.backgroundColor = options.background;
+            this.renderer.setClearColor(options.background, 1);
+        }
+
+        this.startRecording(options);
+        
+        // Allow rendering to catch up with size/color changes
+        await new Promise(r => setTimeout(r, 100));
+        
+        try {
+            await this.processTextSelection(text);
+        } catch (e) {
+            console.error('[Avatar] Error during video export playback:', e);
+        }
+        
+        // Wait a short moment after finishing to avoid cutting off the end
+        await new Promise(r => setTimeout(r, 500));
+        
+        const blob = await this.stopRecording();
+
+        // Revert to original state
+        if (options.hd) {
+            this.renderer.setSize(originalWidth || window.innerWidth, originalHeight || window.innerHeight);
+            this.camera.aspect = (originalWidth || window.innerWidth) / (originalHeight || window.innerHeight);
+            this.camera.updateProjectionMatrix();
+        }
+        
+        if (options.background) {
+            document.body.style.backgroundColor = originalBodyBg;
+            this.renderer.setClearColor(originalClearColor, originalClearAlpha);
+        }
+
+        return blob;
+    }
 
     /** Handle window resize */
     onResize() {
