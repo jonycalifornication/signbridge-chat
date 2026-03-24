@@ -10,11 +10,11 @@ export const CAMERA_DEFAULTS = {
 };
 
 export const ANIMATION_DEFAULTS = {
-    FADE_DURATION: 0.3,
-    PAUSE_BETWEEN_ANIMATIONS: 300, // ms
-    CROSSFADE_DURATION: 0.2,
+    FADE_DURATION: 0.15,
+    PAUSE_BETWEEN_ANIMATIONS: 150, // ms (shortened for smoother sequences)
+    CROSSFADE_DURATION: 0.08, // ms (very short blend to avoid losing the first frames of a sign)
     DEFAULT_PLAYBACK_SPEED: 1.0,
-    REST_POSE_FADE_DURATION: 0.3
+    REST_POSE_FADE_DURATION: 0.15 // ms (faster return to rest pose)
 };
 
 export const RENDERER_DEFAULTS = {

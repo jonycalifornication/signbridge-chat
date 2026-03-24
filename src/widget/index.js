@@ -561,20 +561,21 @@ export class AvatarWidget {
         newAction.setLoop(THREE.LoopOnce);
         newAction.clampWhenFinished = true;
         newAction.enabled = true;
+        
+        // Start playing at full weight immediately to avoid missing the first frames
         newAction.setEffectiveWeight(1.0);
         newAction.setEffectiveTimeScale(this.getPlaybackRate());
         newAction.setEffectiveTimeScale(this.playbackSpeed);
 
-        // Fade out idle action while new animation plays
+        // Fade out idle action so it blends underneath the new action
         if (this.idleAction) {
             this.idleAction.fadeOut(ANIMATION_DEFAULTS.CROSSFADE_DURATION);
         }
 
+        // Fade out previous action
         if (this.currentAction && this.currentAction !== this.idleAction) {
             this.currentAction.fadeOut(ANIMATION_DEFAULTS.CROSSFADE_DURATION);
         }
-
-        newAction.fadeIn(ANIMATION_DEFAULTS.CROSSFADE_DURATION);
 
         newAction.play();
         this.currentAction = newAction;

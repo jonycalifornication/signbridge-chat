@@ -1,5 +1,5 @@
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { createVRMAnimationClip, VRMAnimationLoaderPlugin } from '@pixiv/three-vrm-animation';
+import { createVRMAnimationClip, VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy } from '@pixiv/three-vrm-animation';
 
 /**
  * Create and configure an animation loader
@@ -53,6 +53,16 @@ export async function loadAnimation(url, vrm, cache = null) {
  * @returns {Object|null} Animation clip or null
  */
 function extractAnimationClip(gltf, vrm) {
+    // Suppress "VRMLookAtQuaternionProxy is not found" warning by creating it manually
+    if (vrm && vrm.lookAt) {
+        let proxy = vrm.scene.children.find(obj => obj.name === 'VRMLookAtQuaternionProxy');
+        if (!proxy) {
+            proxy = new VRMLookAtQuaternionProxy(vrm.lookAt);
+            proxy.name = 'VRMLookAtQuaternionProxy';
+            vrm.scene.add(proxy);
+        }
+    }
+
     // Try VRM animations first
     if (gltf.userData.vrmAnimations?.length > 0) {
         return createVRMAnimationClip(gltf.userData.vrmAnimations[0], vrm);
