@@ -6,6 +6,7 @@ import { CAMERA_DEFAULTS, ANIMATION_DEFAULTS, RENDERER_DEFAULTS, LIGHTS } from '
 import { CONFIG } from '../config.js';
 import { getDownloadManager } from '../utils/animation-download-manager.js';
 import { logDeviceInfo } from '../utils/device-logger.js';
+import { createRestPoseClip } from '../utils/rest-pose.js';
 
 /**
  * Compact avatar widget with text selection trigger
@@ -33,6 +34,7 @@ export class AvatarWidget {
         this.currentAction = null;
         this.isExpanded = false;
         this.playbackRate = 1;
+        this.playbackSpeed = ANIMATION_DEFAULTS.DEFAULT_PLAYBACK_SPEED;
 
         // Expression state
         this.currentExpressionSequence = null;
@@ -399,8 +401,19 @@ export class AvatarWidget {
             });
             this.scene.add(this.currentVrm.scene);
             this.mixer = new THREE.AnimationMixer(this.currentVrm.scene);
-            // playIdleAnimation was missing, we use setNeutralPose instead initially
-            this.setNeutralPose();
+
+            // Create rest pose idle action (inline quaternions — instant)
+            const restClip = createRestPoseClip(this.currentVrm);
+            if (restClip) {
+                this.idleAction = this.mixer.clipAction(restClip);
+                this.idleAction.setLoop(THREE.LoopOnce);
+                this.idleAction.clampWhenFinished = true;
+                this.idleAction.setEffectiveWeight(1.0);
+                this.idleAction.play();
+            } else {
+                console.warn('[Avatar] Could not create rest pose, falling back to setNeutralPose');
+                this.setNeutralPose();
+            }
             
             // Hide loader smoothly
             setTimeout(() => {
@@ -482,6 +495,19 @@ export class AvatarWidget {
     }
 
     /**
+     * Set animation playback speed
+     * @param {number} speed - Speed multiplier (1.0 = normal, 2.0 = double speed)
+     */
+    setPlaybackSpeed(speed) {
+        this.playbackSpeed = Math.max(0.1, Math.min(speed, 5.0));
+        // Update current action if playing
+        if (this.currentAction && this.currentAction !== this.idleAction) {
+            this.currentAction.setEffectiveTimeScale(this.playbackSpeed);
+        }
+        console.log(`[Avatar] Playback speed set to ${this.playbackSpeed}x`);
+    }
+
+    /**
      * Play named animation
      * @param {string} name - Animation name or gloss
      */
@@ -528,11 +554,18 @@ export class AvatarWidget {
         newAction.enabled = true;
         newAction.setEffectiveWeight(1.0);
         newAction.setEffectiveTimeScale(this.getPlaybackRate());
+        newAction.setEffectiveTimeScale(this.playbackSpeed);
 
-        if (this.currentAction) {
-            // Плавный переход от старой к новой
-            newAction.crossFadeFrom(this.currentAction, 0.5, true);
+        // Fade out idle action while new animation plays
+        if (this.idleAction) {
+            this.idleAction.fadeOut(ANIMATION_DEFAULTS.CROSSFADE_DURATION);
         }
+
+        if (this.currentAction && this.currentAction !== this.idleAction) {
+            this.currentAction.fadeOut(ANIMATION_DEFAULTS.CROSSFADE_DURATION);
+        }
+
+        newAction.fadeIn(ANIMATION_DEFAULTS.CROSSFADE_DURATION);
 
         newAction.play();
         this.currentAction = newAction;
@@ -542,11 +575,12 @@ export class AvatarWidget {
             const onFinished = (e) => {
                 if (e.action === newAction) {
                     this.mixer.removeEventListener('finished', onFinished);
-                    // Плавный возврат в Idle
+                    // Плавный возврат в rest pose
+                    newAction.fadeOut(ANIMATION_DEFAULTS.REST_POSE_FADE_DURATION);
                     if (this.idleAction) {
-                        this.idleAction.enabled = true;
+                        this.idleAction.reset();
                         this.idleAction.setEffectiveWeight(1.0);
-                        this.idleAction.crossFadeFrom(newAction, 0.5, true);
+                        this.idleAction.fadeIn(ANIMATION_DEFAULTS.REST_POSE_FADE_DURATION);
                         this.idleAction.play();
                     }
                     resolve();
@@ -679,6 +713,12 @@ export class AvatarWidget {
 
         console.log('[Avatar] Playing item:', json);
 
+        // Apply speed multiplier if provided
+        const previousSpeed = this.playbackSpeed;
+        if (json.speed_multiplier) {
+            this.setPlaybackSpeed(json.speed_multiplier);
+        }
+
         let animPromise = Promise.resolve();
         if (json.animation) {
             animPromise = this.playAnimation(json.animation);
@@ -716,6 +756,11 @@ export class AvatarWidget {
         }
 
         await Promise.all([animPromise, speechPromise]);
+
+        // Restore previous speed if it was overridden
+        if (json.speed_multiplier) {
+            this.setPlaybackSpeed(previousSpeed);
+        }
     }
 
     /**

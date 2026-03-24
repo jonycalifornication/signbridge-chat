@@ -24,6 +24,7 @@ export default defineConfig({
         quaternion_demo: resolve(__dirname, 'quaternion_demo/index.html'),
         mobile_demo: resolve(__dirname, 'mobile_demo/index.html'),
         documentation: resolve(__dirname, 'documentation/index.html'),
+        headless: resolve(__dirname, 'headless-renderer.html'),
       }
     }
   }

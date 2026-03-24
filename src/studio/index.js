@@ -9,6 +9,7 @@ import { setupGlossesInput } from './glosses-input.js';
 import { setupVideoControls } from './video-controls.js';
 import { setupTimelineMarkers, setupTimelineInteraction } from './timeline.js';
 import { logDeviceInfo } from '../utils/device-logger.js';
+import { createRestPoseClip } from '../utils/rest-pose.js';
 
 /**
  * Studio recorder for creating VRM animation videos
@@ -25,6 +26,7 @@ class StudioRecorder {
         this.mixer = null;
         this.animationCache = new Map();
         this.currentAction = null;
+        this.idleAction = null;
 
         // Recording state
         this.glosses = [];
@@ -201,6 +203,17 @@ class StudioRecorder {
             }
 
             this.mixer = new THREE.AnimationMixer(this.currentVrm.scene);
+
+            // Create rest pose idle action (inline quaternions — instant)
+            const restClip = createRestPoseClip(this.currentVrm);
+            if (restClip) {
+                this.idleAction = this.mixer.clipAction(restClip);
+                this.idleAction.setLoop(THREE.LoopOnce);
+                this.idleAction.clampWhenFinished = true;
+                this.idleAction.setEffectiveWeight(1.0);
+                this.idleAction.play();
+            }
+
             console.log(`[Studio] Model loaded from ${path}`);
         } catch (error) {
             console.error('Failed to load model:', error);
@@ -258,6 +271,14 @@ class StudioRecorder {
             const handler = (e) => {
                 if (e.action === action) {
                     this.mixer.removeEventListener('finished', handler);
+                    // Fade back to rest pose
+                    action.fadeOut(0.3);
+                    if (this.idleAction) {
+                        this.idleAction.reset();
+                        this.idleAction.setEffectiveWeight(1.0);
+                        this.idleAction.fadeIn(0.3);
+                        this.idleAction.play();
+                    }
                     resolve(clip.duration);
                 }
             };
