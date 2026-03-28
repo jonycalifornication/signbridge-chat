@@ -184,7 +184,12 @@ export class AvatarWidget {
     handleTextSelection() {
         const selectedText = window.getSelection().toString().trim().toLowerCase();
         if (!selectedText) return;
-        this.processTextSelection(selectedText);
+        // Guard against overlapping animation calls from rapid mouseup/touchend events
+        if (this._isPlaying) return;
+        this._isPlaying = true;
+        this.processTextSelection(selectedText).finally(() => {
+            this._isPlaying = false;
+        });
     }
 
     /** Process explicit text for animation trigger */
@@ -244,13 +249,54 @@ export class AvatarWidget {
 
         console.log(`[Avatar] Falling back to letter animations for "${text}"`);
 
-        for (const [index, letter] of letters.entries()) {
-            await Promise.all([
-                this.playAnimation(letter),
-                this.speak(letter, speed)
-            ]);
+        // Preload all unique letter animations in parallel before playback
+        const uniqueLetters = [...new Set(letters)];
+        const letterUrlMap = new Map(); // letter -> blobUrl
 
-            if (index < letters.length - 1) {
+        // Translate and download all unique letters concurrently
+        const preloadPromises = uniqueLetters
+            .filter(letter => !CONFIG.animations[letter]) // Skip letters already in local config
+            .map(async (letter) => {
+                try {
+                    const { getApiClient } = await import('../utils/api-client.js');
+                    const apiClient = getApiClient();
+                    const response = await apiClient.translate(letter);
+                    if (response?.sequence?.length > 0) {
+                        const seq = response.sequence[0];
+                        if (seq.found && seq.file_url) {
+                            const blobUrl = await this.downloadManager.getAnimationUrl(seq.file_url);
+                            letterUrlMap.set(letter, blobUrl);
+                            // Pre-parse into Three.js clip
+                            await loadAnimation(blobUrl, this.currentVrm, this.animationCache).catch(() => null);
+                        }
+                    }
+                } catch (err) {
+                    console.warn(`[Avatar] Failed to preload letter "${letter}":`, err);
+                }
+            });
+
+        await Promise.all(preloadPromises);
+        console.log(`[Avatar] Pre-loaded ${letterUrlMap.size}/${uniqueLetters.length} letter animations`);
+
+        // Now play all letters sequentially (all data is already cached)
+        for (const [index, letter] of letters.entries()) {
+            const isLastLetter = index === letters.length - 1;
+
+            // Use preloaded URL if available, otherwise fall back to playAnimation
+            const preloadedUrl = letterUrlMap.get(letter);
+            if (preloadedUrl) {
+                await Promise.all([
+                    this.playAnimationFromUrl(preloadedUrl),
+                    this.speak(letter, speed)
+                ]);
+            } else {
+                await Promise.all([
+                    this.playAnimation(letter),
+                    this.speak(letter, speed)
+                ]);
+            }
+
+            if (!isLastLetter) {
                 await this.waitScaled(ANIMATION_DEFAULTS.PAUSE_BETWEEN_ANIMATIONS);
             }
         }
@@ -271,7 +317,29 @@ export class AvatarWidget {
             return;
         }
 
+        // Preload ALL animations before starting playback.
+        // This avoids download pauses between animations in long sentences.
+        if (!preloadedUrls || preloadedUrls.size === 0) {
+            try {
+                console.log(`[Avatar] Preloading ${sequence.length} animations before playback...`);
+                preloadedUrls = await this.downloadManager.preloadSequence(sequence);
+            } catch (preloadErr) {
+                console.warn('[Avatar] Preload failed, will download on-the-fly:', preloadErr);
+                preloadedUrls = preloadedUrls || new Map();
+            }
+        }
+
+        // Pre-parse all downloaded VRMA files into Three.js clips (fills animationCache)
+        if (preloadedUrls && preloadedUrls.size > 0 && this.currentVrm) {
+            const parsePromises = [...preloadedUrls.values()].map(blobUrl =>
+                loadAnimation(blobUrl, this.currentVrm, this.animationCache).catch(() => null)
+            );
+            await Promise.all(parsePromises);
+            console.log(`[Avatar] Pre-parsed ${parsePromises.length} animation clips`);
+        }
+
         for (const [index, item] of sequence.entries()) {
+            const isLast = index === sequence.length - 1;
             const spokenText = item?.text || item?.word || '';
             const lipSpeed = item?.duration
                 ? (item.duration * 1000) / Math.max(spokenText.length, 1)
@@ -303,10 +371,13 @@ export class AvatarWidget {
                 await this.playTextAsLetters(spokenText, lipSpeed);
             }
 
-            if (index < sequence.length - 1) {
+            if (!isLast) {
                 await this.waitScaled(ANIMATION_DEFAULTS.PAUSE_BETWEEN_ANIMATIONS);
             }
         }
+
+        // Ensure rest pose at the very end of the full sequence
+        this.returnToRestPose();
     }
 
     /** Setup widget toggle behavior */
@@ -547,7 +618,9 @@ export class AvatarWidget {
     }
 
     /**
-     * Play animation from direct URL
+     * Play animation from direct URL.
+     * The animation clamps at its last frame when finished (no automatic rest pose return).
+     * Call returnToRestPose() explicitly after a sequence if needed.
      * @param {string} url - Direct URL to VRMA file
      */
     async playAnimationFromUrl(url) {
@@ -572,32 +645,43 @@ export class AvatarWidget {
             this.idleAction.fadeOut(ANIMATION_DEFAULTS.CROSSFADE_DURATION);
         }
 
-        // Fade out previous action
-        if (this.currentAction && this.currentAction !== this.idleAction) {
+        // Fade out previous action (but NOT if it's the same action being replayed —
+        // mixer.clipAction() returns the same object for the same clip)
+        if (this.currentAction && this.currentAction !== this.idleAction && this.currentAction !== newAction) {
             this.currentAction.fadeOut(ANIMATION_DEFAULTS.CROSSFADE_DURATION);
         }
 
         newAction.play();
         this.currentAction = newAction;
 
-        // Ждем окончания
+        // Wait for animation to finish — stays clamped at last frame
         return new Promise((resolve) => {
             const onFinished = (e) => {
                 if (e.action === newAction) {
                     this.mixer.removeEventListener('finished', onFinished);
-                    // Плавный возврат в rest pose
-                    newAction.fadeOut(ANIMATION_DEFAULTS.REST_POSE_FADE_DURATION);
-                    if (this.idleAction) {
-                        this.idleAction.reset();
-                        this.idleAction.setEffectiveWeight(1.0);
-                        this.idleAction.fadeIn(ANIMATION_DEFAULTS.REST_POSE_FADE_DURATION);
-                        this.idleAction.play();
-                    }
                     resolve();
                 }
             };
             this.mixer.addEventListener('finished', onFinished);
         });
+    }
+
+    /**
+     * Smoothly return to rest (idle) pose.
+     * Call this after the last animation in a sequence.
+     * Uses a long fade for natural-looking hand lowering.
+     */
+    returnToRestPose() {
+        const fadeDuration = ANIMATION_DEFAULTS.REST_POSE_FADE_DURATION;
+        if (this.currentAction && this.currentAction !== this.idleAction) {
+            this.currentAction.fadeOut(fadeDuration);
+        }
+        if (this.idleAction) {
+            this.idleAction.reset();
+            this.idleAction.setEffectiveWeight(1.0);
+            this.idleAction.fadeIn(fadeDuration);
+            this.idleAction.play();
+        }
     }
 
     /**
@@ -718,6 +802,8 @@ export class AvatarWidget {
             for (const item of json) {
                 await this.playFromJSON(item);
             }
+            // Return to rest pose after the full sequence
+            this.returnToRestPose();
             return;
         }
 

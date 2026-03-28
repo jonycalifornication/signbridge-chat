@@ -241,7 +241,7 @@ class StudioRecorder {
      * @param {string} name - Animation name
      * @returns {Promise<number|null>} Duration or null
      */
-    async playAnimation(name) {
+    async playAnimation(name, { skipRestPose = false } = {}) {
         const clip = await this.loadAnimation(name);
         if (!clip) return null;
 
@@ -251,16 +251,12 @@ class StudioRecorder {
         action.clampWhenFinished = true;
         action.setEffectiveWeight(1.0); // Ensure full weight
 
-        // Smooth transition (Crossfade)
-        if (this.currentAction) {
-            // Restore effective weight of previous action if it faded out?
-            // No, crossFadeFrom handles the weight transfer.
-            // But we must ensure the previous action is still 'active' for the fade to work visually?
-            // If it's finished/clamped, it contributes to the pose.
-
+        // Smooth transition (Crossfade) — skip if replaying the same clip
+        // (mixer.clipAction returns the same object for the same clip)
+        if (this.currentAction && this.currentAction !== action) {
             action.crossFadeFrom(this.currentAction, 0.5, true);
-        } else {
-            // First animation - maybe fade in from T-pose?
+        } else if (!this.currentAction) {
+            // First animation - fade in from rest pose
             action.fadeIn(0.5);
         }
 
@@ -271,19 +267,41 @@ class StudioRecorder {
             const handler = (e) => {
                 if (e.action === action) {
                     this.mixer.removeEventListener('finished', handler);
-                    // Fade back to rest pose
-                    action.fadeOut(0.3);
-                    if (this.idleAction) {
-                        this.idleAction.reset();
-                        this.idleAction.setEffectiveWeight(1.0);
-                        this.idleAction.fadeIn(0.3);
-                        this.idleAction.play();
+
+                    if (skipRestPose) {
+                        // Don't return to rest pose — next animation will crossfade directly
+                        resolve(clip.duration);
+                    } else {
+                        // Fade back to rest pose (only for the last animation in a sequence)
+                        action.fadeOut(0.3);
+                        if (this.idleAction) {
+                            this.idleAction.reset();
+                            this.idleAction.setEffectiveWeight(1.0);
+                            this.idleAction.fadeIn(0.3);
+                            this.idleAction.play();
+                        }
+                        resolve(clip.duration);
                     }
-                    resolve(clip.duration);
                 }
             };
             this.mixer.addEventListener('finished', handler);
         });
+    }
+
+    /**
+     * Smoothly return to rest (idle) pose.
+     * Call this after the last animation in a sequence.
+     */
+    returnToRestPose() {
+        if (this.currentAction && this.currentAction !== this.idleAction) {
+            this.currentAction.fadeOut(0.3);
+        }
+        if (this.idleAction) {
+            this.idleAction.reset();
+            this.idleAction.setEffectiveWeight(1.0);
+            this.idleAction.fadeIn(0.3);
+            this.idleAction.play();
+        }
     }
 
     /** Detect supported video MIME type */
@@ -332,15 +350,19 @@ class StudioRecorder {
         this.isRecording = true;
         document.getElementById('progress-bar').style.display = 'block';
 
-        // Record all animations
+        // Record all animations — skip rest pose for all except the last one
         for (let i = 0; i < this.glosses.length; i++) {
-            const duration = await this.playAnimation(this.glosses[i]);
+            const isLast = i === this.glosses.length - 1;
+            const duration = await this.playAnimation(this.glosses[i], { skipRestPose: !isLast });
             if (duration) {
                 const progress = ((i + 1) / this.glosses.length) * 100;
                 this.updateProgress(progress);
                 await new Promise(resolve => setTimeout(resolve, 300));
             }
         }
+
+        // Ensure we return to rest pose after the final animation
+        this.returnToRestPose();
 
         // Stop recording
         setTimeout(() => {
