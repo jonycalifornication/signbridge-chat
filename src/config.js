@@ -87,7 +87,7 @@ export const CONFIG = Object.freeze({
     camera: {
         posX: 0.0,
         posY: 1.3,
-        posZ: 2.5,
+        posZ: 2.8,
         fov: 35.0,
     },
 
