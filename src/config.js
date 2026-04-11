@@ -98,8 +98,8 @@ export const CONFIG = Object.freeze({
 
     widget: {
         transparent: true,
-        width: 400,
-        height: 500,
+        width: 500,
+        height: 400,
     },
 
     lights: {
