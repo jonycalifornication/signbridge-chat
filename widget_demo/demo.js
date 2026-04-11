@@ -13,8 +13,11 @@ class WidgetDemo {
     constructor() {
         this.textInput = document.getElementById('text-input');
         this.playBtn = document.getElementById('play-btn');
+        this.searchInput = document.getElementById('search-input');
+        this.searchResults = document.getElementById('search-results');
 
         this.widget = null;
+        this.searchTimeout = null;
 
         this.init();
     }
@@ -38,6 +41,21 @@ class WidgetDemo {
             if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
                 event.preventDefault();
                 this.play();
+            }
+        });
+
+        // Search Input
+        this.searchInput.addEventListener('input', () => this.handleSearchInput());
+        this.searchInput.addEventListener('focus', () => {
+            if (this.searchInput.value.trim().length >= 2) {
+                this.searchResults.style.display = 'block';
+            }
+        });
+
+        // Close search results when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!this.searchInput.contains(e.target) && !this.searchResults.contains(e.target)) {
+                this.searchResults.style.display = 'none';
             }
         });
 
@@ -384,6 +402,67 @@ class WidgetDemo {
             console.error('Failed to play input text:', e);
             alert('Не удалось проиграть текст. Проверьте консоль.');
         }
+    }
+
+    handleSearchInput() {
+        const query = this.searchInput.value.trim();
+        
+        clearTimeout(this.searchTimeout);
+        
+        if (query.length < 2) {
+            this.searchResults.innerHTML = '';
+            this.searchResults.style.display = 'none';
+            return;
+        }
+
+        this.searchResults.style.display = 'block';
+        this.searchResults.innerHTML = '<div class="search-loading">Поиск...</div>';
+
+        this.searchTimeout = setTimeout(() => this.performSearch(query), 400);
+    }
+
+    async performSearch(query) {
+        try {
+            const results = await this.apiClient.search(query, { limit: 10 });
+            this.renderSearchResults(results);
+        } catch (error) {
+            console.error('Search failed:', error);
+            this.searchResults.innerHTML = '<div class="search-no-results">Ошибка при поиске</div>';
+        }
+    }
+
+    renderSearchResults(results) {
+        if (!results || results.length === 0) {
+            this.searchResults.innerHTML = '<div class="search-no-results">Ничего не найдено</div>';
+            return;
+        }
+
+        this.searchResults.innerHTML = '';
+        
+        results.forEach(variant => {
+            const item = document.createElement('div');
+            item.className = 'search-result-item';
+            
+            const glossName = variant.gloss?.name || 'Без названия';
+            const synonyms = variant.gloss?.synonyms?.length > 0 
+                ? ` (${variant.gloss.synonyms.join(', ')})` 
+                : '';
+            const category = variant.gloss?.category ? ` • ${variant.gloss.category}` : '';
+
+            item.innerHTML = `
+                <div class="gloss-name">${glossName}</div>
+                <div class="gloss-meta">${variant.language_id}${category}${synonyms}</div>
+            `;
+            
+            item.addEventListener('click', () => {
+                this.searchInput.value = '';
+                this.searchResults.style.display = 'none';
+                this.textInput.value = glossName;
+                this.play(glossName);
+            });
+            
+            this.searchResults.appendChild(item);
+        });
     }
 }
 

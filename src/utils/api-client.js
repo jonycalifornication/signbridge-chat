@@ -162,6 +162,40 @@ export class ApiClient {
         const blob = new Blob([buffer], { type: 'model/gltf-binary' });
         return URL.createObjectURL(blob);
     }
+
+    /**
+     * Search for sign variants
+     * @param {string} query - Search query
+     * @param {Object} [options] - Additional search parameters
+     * @returns {Promise<Array>} List of sign variants
+     */
+    async search(query, options = {}) {
+        const url = new URL(`${this.baseUrl}/cms/search`);
+        url.searchParams.append('q', query);
+        
+        const lang = options.languageId || this.languageId;
+        if (lang) {
+            url.searchParams.append('language_id', lang);
+        }
+
+        if (options.limit) {
+            url.searchParams.append('limit', options.limit);
+        }
+
+        console.log(`[ApiClient] Searching: "${query}" (lang: ${lang})`);
+
+        const response = await this._fetch(url.toString(), {
+            method: 'GET',
+            headers: this._getHeaders(),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => 'Unknown error');
+            throw new Error(`Search API failed (${response.status}): ${errorText}`);
+        }
+
+        return await response.json();
+    }
 }
 
 // Singleton instance
