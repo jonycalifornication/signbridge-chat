@@ -21,8 +21,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.renderer
-    ports:
-      - "3000:3000"
+#    ports:
+#      - "3000:3000"
+
     environment:
       - APP_URL=http://avatar-widget:5173
     volumes:
