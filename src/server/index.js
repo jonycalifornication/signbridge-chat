@@ -113,7 +113,8 @@ class Semaphore {
     }
 }
 
-const renderSemaphore = new Semaphore(2);
+const renderSemaphore = new Semaphore(1);
+
 
 
 /**
