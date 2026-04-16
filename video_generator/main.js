@@ -1,8 +1,12 @@
-console.log('🚀 SignBridge Initializing...');
+console.log('🚀 SignBridge Loading System Components...');
 
 const getEl = (id) => {
     const el = document.getElementById(id);
-    if (!el) console.warn(`[DOM] Element #${id} not found!`);
+    if (!el) {
+        console.warn(`[DOM] Warning: Element #${id} not found in current view.`);
+    } else {
+        console.log(`[DOM] Found: #${id}`);
+    }
     return el;
 };
 
@@ -20,6 +24,7 @@ const avatarPopover = getEl('avatar-popover');
 const themeToggle = getEl('theme-toggle');
 const langFlag = getEl('lang-flag');
 
+console.log(`[Init] Colors found: ${colorOptions.length}`);
 
 const HISTORY_KEY = 'signbridge_sessions_var2';
 const THEME_KEY = 'signbridge_theme';
@@ -32,10 +37,14 @@ const EXPIRATION_MS = 55 * 60 * 1000; // 55 minutes
 
 // --- Init ---
 async function init() {
+    console.log('[System] Initializing theme...');
     initTheme();
+    console.log('[System] Initializing sessions from server...');
     await initSession();
+    console.log('[System] Setting up auto-resize...');
     setupAutoResize();
 }
+
 
 // --- Listeners ---
 // Background Popover
