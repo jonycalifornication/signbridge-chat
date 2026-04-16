@@ -4,10 +4,17 @@ import { resolve } from 'path';
 export default defineConfig({
   server: {
     host: '0.0.0.0',
+    cors: true,
+    allowedHosts: true, // Allow Docker internal hostname (avatar-widget)
     proxy: {
-      // Proxy API requests to backend in dev mode
+      // Proxy video generation requests to the renderer service
+      '/api/v1/video': {
+        target: process.env.RENDERER_URL || 'http://avatar-renderer:3000',
+        changeOrigin: true,
+      },
+      // Proxy other API requests to the main backend
       '/api': {
-        target: 'http://94.131.83.85:8000',
+        target: process.env.BACKEND_URL || 'http://host.docker.internal:8000',
         changeOrigin: true,
       }
     }
@@ -23,8 +30,7 @@ export default defineConfig({
         stream_demo: resolve(__dirname, 'stream_demo/index.html'),
         quaternion_demo: resolve(__dirname, 'quaternion_demo/index.html'),
         mobile_demo: resolve(__dirname, 'mobile_demo/index.html'),
-        documentation: resolve(__dirname, 'documentation/index.html'),
-        headless: resolve(__dirname, 'headless-renderer.html'),
+        //        documentation: resolve(__dirname, 'documentation/index.html'),
       }
     }
   }

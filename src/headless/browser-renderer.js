@@ -45,42 +45,187 @@ class HeadlessRenderer extends AvatarWidget {
             this.renderer.setClearColor(background, 1);
         }
 
-        // 3. Prepare MediaRecorder
-        const stream = this.renderer.domElement.captureStream(30); // 30 FPS
-        const recorder = new MediaRecorder(stream, {
-            mimeType: 'video/webm;codecs=vp9'
-        });
+        const text = Array.isArray(glosses) ? glosses.join(' ') : glosses;
+        console.log(`[Headless] Preloading all animations for text: "${text}"`);
+        if (window.reportProgress) window.reportProgress(20, 'Распознаем контекст и ищем шаблоны движений...');
         
-        const chunks = [];
-        recorder.ondataavailable = (e) => {
-            if (e.data.size > 0) chunks.push(e.data);
+        let apiResponse = null;
+        let apiUrls = null;
+
+        // 3. Pre-fetch and Pre-parse EVERYTHING before recording begins (NO PAUSES IN VIDEO)
+        try {
+            const result = await this.downloadManager.translateAndPreload(text);
+            apiResponse = result.response;
+            apiUrls = result.urls;
+
+            // Force parse into Three.js objects right now
+            const { loadAnimation } = await import('../utils/animation-loader.js');
+            if (apiUrls && apiUrls.size > 0 && this.currentVrm) {
+                if (window.reportProgress) window.reportProgress(30, 'Загружаем 3D-данные из подсознания (S3)...');
+                const parsePromises = [...apiUrls.values()].map(blobUrl =>
+                    loadAnimation(blobUrl, this.currentVrm, this.animationCache).catch(() => null)
+                );
+                await Promise.all(parsePromises);
+                console.log('[Headless] All animations fully downloaded and parsed into memory!');
+            }
+        } catch (e) {
+            console.error('[Headless] Preload error, will fallback:', e);
+        }
+
+        if (!window.WebMMuxer) {
+            throw new Error('WebMMuxer not found via CDN!');
+        }
+
+        const framerate = 30;
+        const tickRate = 1000 / framerate;
+        
+        const encWidth = window.innerWidth;
+        const encHeight = window.innerHeight;
+        
+        const muxer = new window.WebMMuxer.Muxer({
+            target: new window.WebMMuxer.ArrayBufferTarget(),
+            video: {
+                codec: 'V_VP8',
+                width: encWidth,
+                height: encHeight,
+                frameRate: framerate
+            }
+        });
+
+        let videoEncoder = new VideoEncoder({
+            output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+            error: e => console.error('[Headless] VideoEncoder Error:', e)
+        });
+
+        videoEncoder.configure({
+            codec: 'vp8',
+            width: encWidth,
+            height: encHeight,
+            bitrate: 5_000_000,
+            framerate: framerate
+        });
+
+        // 4. Hijack Environment for Deterministic Time
+        const originalSetTimeout = window.setTimeout;
+        const originalClearTimeout = window.clearTimeout;
+        const originalRAF = window.requestAnimationFrame;
+        const originalDateNow = Date.now;
+        const originalPerfNow = performance.now;
+        const originalClockDelta = this.clock ? this.clock.getDelta : null;
+
+        let virtualTime = 0;
+        const pendingTimeouts = [];
+        let rafIdx = 0;
+        
+        window.setTimeout = (cb, delay) => {
+            const id = ++rafIdx;
+            pendingTimeouts.push({ id, cb, fireAt: virtualTime + (delay || 0) });
+            return id;
+        };
+        window.clearTimeout = (id) => {
+            const idx = pendingTimeouts.findIndex(t => t.id === id);
+            if (idx >= 0) pendingTimeouts.splice(idx, 1);
+        };
+        
+        performance.now = () => virtualTime;
+        Date.now = () => virtualTime;
+        if (this.clock) {
+            this.clock.getDelta = () => tickRate / 1000;
+        }
+
+        let rafCb = null;
+        window.requestAnimationFrame = (cb) => {
+            rafCb = cb;
+            return ++rafIdx;
         };
 
-        const recordingFinished = new Promise((resolve) => {
-            recorder.onstop = () => {
-                const blob = new Blob(chunks, { type: 'video/webm' });
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.readAsDataURL(blob);
-            };
-        });
+        // Execution flags
+        let isEncoding = true;
+        let frameCount = 0;
 
-        // 4. Start recording
-        recorder.start();
-        console.log('[Headless] Recording started');
+        // Background deterministic loop
+        const encodingPromise = (async () => {
+             while (isEncoding || pendingTimeouts.length > 0) {
+                 virtualTime += tickRate;
+                 
+                 const ripe = [];
+                 for (let i = pendingTimeouts.length - 1; i >= 0; i--) {
+                     if (virtualTime >= pendingTimeouts[i].fireAt) {
+                         ripe.push(pendingTimeouts.splice(i, 1)[0]);
+                     }
+                 }
+                 ripe.sort((a,b) => a.fireAt - b.fireAt);
+                 ripe.forEach(t => t.cb());
+                 
+                 if (rafCb) {
+                     const cb = rafCb;
+                     rafCb = null;
+                     cb(virtualTime);
+                 }
+                 
+                 if (isEncoding) {
+                     const bitmap = await createImageBitmap(this.renderer.domElement);
+                     const frame = new VideoFrame(bitmap, { timestamp: frameCount * 1_000_000 / framerate });
+                     videoEncoder.encode(frame, { keyFrame: frameCount % 30 === 0 });
+                     frame.close();
+                     frameCount++;
+                     
+                     if (frameCount % 60 === 0 && window.reportProgress) {
+                         // Math trick to keep progress between 50 and 80 roughly
+                         window.reportProgress(50 + Math.min(25, (frameCount/30)), `Синтезируем движения: кадр ${frameCount} ⚡`);
+                     }
+                 }
+                 
+                 await new Promise(r => originalSetTimeout(r, 0));
+             }
+        })();
 
-        // 5. Play animations
-        for (const gloss of glosses) {
-            console.log(`[Headless] Playing gloss: ${gloss}`);
-            await this.processTextSelection(gloss);
-            // Optional: add a small delay between glosses if not handled by processTextSelection
+        console.log('[Headless] Deterministic recording started');
+        if (window.reportProgress) window.reportProgress(50, 'Оживляем аватар в турбо-режиме (30 FPS)...');
+
+        // 5. Play sequence smoothly (completely detached from wall-clock time)
+        if (apiResponse && apiResponse.sequence && apiResponse.sequence.length > 0) {
+            await this.playTranslateResponse(apiResponse, apiUrls);
+        } else {
+            console.warn('[Headless] No valid API sequence returned. Falling back to default playback.');
+            await this.processTextSelection(text);
         }
 
         // 6. Stop recording
-        // Small buffer at the end
-        await new Promise(r => setTimeout(r, 500));
-        recorder.stop();
-        console.log('[Headless] Recording stopped');
+        if (window.reportProgress) window.reportProgress(80, 'Финальные вычисления нейросети...');
+        
+        // Small buffer inside virtual time so hands can smoothly lower
+        let waitEnd = virtualTime + 2000; 
+        pendingTimeouts.push({
+            id: ++rafIdx,
+            fireAt: waitEnd,
+            cb: () => { isEncoding = false; }
+        });
+        
+        await encodingPromise;
+        
+        await videoEncoder.flush();
+        videoEncoder.close();
+        muxer.finalize();
+        
+        window.setTimeout = originalSetTimeout;
+        window.clearTimeout = originalClearTimeout;
+        window.requestAnimationFrame = originalRAF;
+        Date.now = originalDateNow;
+        performance.now = originalPerfNow;
+        if (this.clock) this.clock.getDelta = originalClockDelta;
+
+        const buffer = muxer.target.buffer;
+        const blob = new Blob([buffer], { type: 'video/webm' });
+        
+        const recordingFinished = new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+        });
+
+        console.log(`[Headless] Deterministic recording finished. Total frames: ${frameCount}`);
+        if (window.reportProgress) window.reportProgress(90, 'Упаковываем нейро-магию в контейнер...');
 
         return await recordingFinished;
     }

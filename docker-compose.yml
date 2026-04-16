@@ -10,10 +10,21 @@ services:
       - "5173:80"
     environment:
       # Backend URL for API proxy (signBridgeStorage)
-      - BACKEND_URL=http://host.docker.internal:8000
+      - BACKEND_URL=${BACKEND_URL:-http://host.docker.internal:8000}
+      # Internal URL for video renderer
+      - RENDERER_URL=http://avatar-renderer:3000
 
     # ✅ Нужно для Linux-сервера, чтобы host.docker.internal резолвился
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+    restart: always
+
+  avatar-renderer:
+    build:
+      context: .
+      dockerfile: Dockerfile.renderer
+    environment:
+      # URL where renderer can reach the static files
+      - APP_URL=http://avatar-widget:80
     restart: always

@@ -68,6 +68,37 @@ export class AvatarWidget {
     }
 
     /**
+     * Generate MP4 video of the avatar performing the text/glosses
+     * Rendering happens server-side.
+     * @param {string} text - Space-separated glosses or text to translate
+     * @param {Object} options - Optional parameters (avatar, background)
+     * @returns {Promise<Blob>} The generated MP4 video as a Blob
+     */
+    async generateVideo(text, options = {}) {
+        if (!text) throw new Error('Text/Glosses required for video generation');
+        
+        console.log(`[Avatar] Requesting server-side video generation for: "${text}"`);
+        
+        const glosses = text.split(/\s+/);
+        // Map common avatar names or use current
+        const avatar = options.avatar || this.currentAvatarName || CONFIG.defaultAvatar;
+        const background = options.background || 'green';
+
+        const response = await fetch('/api/v1/video/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ glosses, avatar, background })
+        });
+
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || `Server error: ${response.status}`);
+        }
+
+        return await response.blob();
+    }
+
+    /**
      * Set playback speed multiplier for body animation and lip-sync
      * @param {number} rate
      */

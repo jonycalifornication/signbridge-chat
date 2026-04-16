@@ -22,7 +22,9 @@
     "jszip": "^3.10.1",
     "kalidokit": "^1.1.5",
     "npyjs": "^1.0.4",
-    "three": "^0.169.0"
+    "three": "^0.169.0",
+    "express": "^4.21.0",
+    "cors": "^2.8.5"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.0.15",
