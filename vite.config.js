@@ -7,11 +7,12 @@ export default defineConfig({
     cors: true,
     allowedHosts: true, // Allow Docker internal hostname (avatar-widget)
     proxy: {
-      // Proxy video generation requests to the renderer service
-      '/api/v1/video': {
+      // Proxy all v1 API requests (video and sessions) to the renderer service
+      '/api/v1': {
         target: process.env.RENDERER_URL || 'http://avatar-renderer:3000',
         changeOrigin: true,
       },
+
       // Proxy other API requests to the main backend
       '/api': {
         target: process.env.BACKEND_URL || 'http://host.docker.internal:8000',

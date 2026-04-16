@@ -3,3 +3,6 @@ node_modules
 public
 dist
 .env
+sessions.json
+temp_videos/
+video_cache/
