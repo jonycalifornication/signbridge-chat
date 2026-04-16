@@ -23,6 +23,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
+        headless_renderer: resolve(__dirname, 'headless-renderer.html'),
         widget: resolve(__dirname, 'widget-demo.html'),
         vrma: resolve(__dirname, 'test-vrma.html'),
         embed: resolve(__dirname, 'embed.html'),
@@ -30,7 +31,8 @@ export default defineConfig({
         stream_demo: resolve(__dirname, 'stream_demo/index.html'),
         quaternion_demo: resolve(__dirname, 'quaternion_demo/index.html'),
         mobile_demo: resolve(__dirname, 'mobile_demo/index.html'),
-        //        documentation: resolve(__dirname, 'documentation/index.html'),
+        studio: resolve(__dirname, 'studio/index.html'),
+        video_generator: resolve(__dirname, 'video_generator/index.html'),
       }
     }
   }
