@@ -27,4 +27,9 @@ services:
     environment:
       # URL where renderer can reach the static files
       - APP_URL=http://avatar-widget:80
+    volumes:
+      - ./sessions.json:/app/sessions.json
+      - ./video_cache:/app/video_cache
+      - ./temp_videos:/app/temp_videos
     restart: always
+

@@ -1,16 +1,25 @@
-const chatMessages = document.getElementById('chat-messages');
-const glossInput = document.getElementById('gloss-input');
-const sendBtn = document.getElementById('send-btn');
-const newChatBtn = document.getElementById('new-chat-btn');
-const historyList = document.getElementById('history-list');
-const welcomeScreen = document.getElementById('welcome-screen');
-const bgSelectorBtn = document.getElementById('bg-selector-btn');
-const bgPopover = document.getElementById('bg-popover');
+console.log('🚀 SignBridge Initializing...');
+
+const getEl = (id) => {
+    const el = document.getElementById(id);
+    if (!el) console.warn(`[DOM] Element #${id} not found!`);
+    return el;
+};
+
+const chatMessages = getEl('chat-messages');
+const glossInput = getEl('gloss-input');
+const sendBtn = getEl('send-btn');
+const newChatBtn = getEl('new-chat-btn');
+const historyList = getEl('history-list');
+const welcomeScreen = getEl('welcome-screen');
+const bgSelectorBtn = getEl('bg-selector-btn');
+const bgPopover = getEl('bg-popover');
 const colorOptions = document.querySelectorAll('.color-option');
-const avatarSelectorBtn = document.getElementById('avatar-selector-btn');
-const avatarPopover = document.getElementById('avatar-popover');
-const themeToggle = document.getElementById('theme-toggle');
-const langFlag = document.getElementById('lang-flag');
+const avatarSelectorBtn = getEl('avatar-selector-btn');
+const avatarPopover = getEl('avatar-popover');
+const themeToggle = getEl('theme-toggle');
+const langFlag = getEl('lang-flag');
+
 
 const HISTORY_KEY = 'signbridge_sessions_var2';
 const THEME_KEY = 'signbridge_theme';
@@ -30,22 +39,30 @@ async function init() {
 
 // --- Listeners ---
 // Background Popover
-bgSelectorBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    avatarPopover.classList.remove('show');
-    avatarSelectorBtn.classList.remove('active');
-    bgPopover.classList.toggle('show');
-    bgSelectorBtn.classList.toggle('active');
-});
+// Background Popover
+if (bgSelectorBtn) {
+    bgSelectorBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (avatarPopover) avatarPopover.classList.remove('show');
+        if (avatarSelectorBtn) avatarSelectorBtn.classList.remove('active');
+        if (bgPopover) bgPopover.classList.toggle('show');
+        bgSelectorBtn.classList.toggle('active');
+    });
+}
+
 
 // Avatar Popover
-avatarSelectorBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    bgPopover.classList.remove('show');
-    bgSelectorBtn.classList.remove('active');
-    avatarPopover.classList.toggle('show');
-    avatarSelectorBtn.classList.toggle('active');
-});
+// Avatar Popover
+if (avatarSelectorBtn) {
+    avatarSelectorBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (bgPopover) bgPopover.classList.remove('show');
+        if (bgSelectorBtn) bgSelectorBtn.classList.remove('active');
+        if (avatarPopover) avatarPopover.classList.toggle('show');
+        avatarSelectorBtn.classList.toggle('active');
+    });
+}
+
 
 document.addEventListener('click', (e) => {
     if (!bgPopover.contains(e.target) && !bgSelectorBtn.contains(e.target)) {
@@ -508,5 +525,6 @@ function updateSessionParam(msgId, data, shouldSyncToServer = true) {
 
 
 // Start app
-init();
+init().then(() => console.log('✅ SignBridge Ready')).catch(e => console.error('❌ SignBridge Init Error:', e));
+
 
