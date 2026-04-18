@@ -14,7 +14,7 @@ const app = express();
 const port = 3000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 
 // Temporary directory for videos
 const TEMP_DIR = path.join(__dirname, '../../temp_videos');
@@ -329,6 +329,10 @@ app.post('/api/v1/video/generate-async', rateLimit, (req, res) => {
             }
             if (tasks.size < MAX_TASKS) break;
         }
+        // Hard cap: reject if still at limit (all processing)
+        if (tasks.size >= MAX_TASKS) {
+            return res.status(503).json({ error: 'Server busy. Try again later.' });
+        }
     }
 
     // Initialize task
@@ -536,18 +540,73 @@ async function getSessionsFromDisk() {
     try {
         const data = await fs.promises.readFile(SESSIONS_FILE, 'utf8');
         return JSON.parse(data);
-    } catch (e) { return []; }
+    } catch (e) {
+        // Try backup if main file is corrupted
+        const backupPath = SESSIONS_FILE + '.bak';
+        try {
+            const backupData = await fs.promises.readFile(backupPath, 'utf8');
+            console.warn('[Storage] Main sessions.json corrupted, restored from backup');
+            return JSON.parse(backupData);
+        } catch (e2) {
+            return [];
+        }
+    }
+}
+
+const MAX_SESSIONS = 1000;
+const MAX_MESSAGES_PER_SESSION = 500;
+const MAX_TITLE_LENGTH = 100;
+
+function validateAndCapSessions(sessions) {
+    if (!Array.isArray(sessions)) return [];
+    return sessions.slice(0, MAX_SESSIONS).map(s => {
+        if (!s || typeof s !== 'object' || typeof s.id !== 'string') return null;
+        return {
+            id: s.id.slice(0, 60),
+            title: (typeof s.title === 'string' ? s.title : '').slice(0, MAX_TITLE_LENGTH),
+            messages: Array.isArray(s.messages)
+                ? s.messages.slice(-MAX_MESSAGES_PER_SESSION).map(m => {
+                    if (!m || typeof m !== 'object') return null;
+                    return {
+                        role: m.role === 'user' || m.role === 'assistant' ? m.role : 'user',
+                        content: typeof m.content === 'string' ? m.content.slice(0, 2000) : undefined,
+                        msgId: typeof m.msgId === 'string' ? m.msgId.slice(0, 60) : undefined,
+                        glosses: typeof m.glosses === 'string' ? m.glosses.slice(0, 2000) : undefined,
+                        videoUrl: typeof m.videoUrl === 'string' ? m.videoUrl.slice(0, 500) : undefined,
+                        taskId: typeof m.taskId === 'string' ? m.taskId.slice(0, 60) : m.taskId === null ? null : undefined,
+                        bgColor: typeof m.bgColor === 'string' ? m.bgColor.slice(0, 30) : undefined,
+                        avatar: typeof m.avatar === 'string' ? m.avatar.slice(0, 50) : undefined,
+                        mode: typeof m.mode === 'string' ? m.mode.slice(0, 20) : undefined,
+                        error: typeof m.error === 'string' ? m.error.slice(0, 500) : undefined,
+                        timestamp: typeof m.timestamp === 'number' ? m.timestamp : undefined,
+                    };
+                }).filter(Boolean)
+                : []
+        };
+    }).filter(Boolean);
+}
+
+async function atomicWriteFile(filePath, data) {
+    const tmpPath = filePath + '.tmp';
+    const backupPath = filePath + '.bak';
+    await fs.promises.writeFile(tmpPath, data);
+    // Create backup of current file
+    try { await fs.promises.copyFile(filePath, backupPath); } catch(e) { /* first write, no backup needed */ }
+    await fs.promises.rename(tmpPath, filePath);
 }
 
 let _writeQueue = Promise.resolve();
 async function safeWriteSessions(incomingSessions) {
     _writeQueue = _writeQueue.then(async () => {
+        // Validate and cap incoming data
+        const validated = validateAndCapSessions(incomingSessions);
+        
         // Merge: preserve videoUrl set by background tasks that client may not know about
         try {
             const diskData = await fs.promises.readFile(SESSIONS_FILE, 'utf8');
             const diskSessions = JSON.parse(diskData);
             for (const diskSession of diskSessions) {
-                const incoming = incomingSessions.find(s => s.id === diskSession.id);
+                const incoming = validated.find(s => s.id === diskSession.id);
                 if (incoming) {
                     for (const diskMsg of (diskSession.messages || [])) {
                         if (diskMsg.videoUrl && diskMsg.msgId) {
@@ -561,8 +620,10 @@ async function safeWriteSessions(incomingSessions) {
                     }
                 }
             }
-        } catch(e) { /* ignore merge errors */ }
-        await fs.promises.writeFile(SESSIONS_FILE, JSON.stringify(incomingSessions, null, 2));
+        } catch(e) {
+            console.warn('[Storage] Merge skipped (disk read failed):', e.message);
+        }
+        await atomicWriteFile(SESSIONS_FILE, JSON.stringify(validated, null, 2));
     }).catch(e => console.error('[Storage] Write error:', e));
     return _writeQueue;
 }
@@ -580,7 +641,7 @@ async function updateSessionTaskResult(sessionId, msgId, videoUrl) {
                 msg.videoUrl = videoUrl;
                 msg.timestamp = Date.now();
                 msg.taskId = null;
-                await fs.promises.writeFile(SESSIONS_FILE, JSON.stringify(sessions, null, 2));
+                await atomicWriteFile(SESSIONS_FILE, JSON.stringify(sessions, null, 2));
                 console.log(`[Storage] Auto-updated message ${msgId} with video result.`);
             }
         }

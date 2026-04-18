@@ -178,6 +178,8 @@ const themeToggle = getEl('theme-toggle');
 const langToggle = getEl('lang-toggle');
 const langFlag = getEl('lang-flag');
 const modeToggle = getEl('mode-toggle');
+const charCounter = getEl('char-counter');
+const scrollBottomBtn = getEl('scroll-bottom-btn');
 
 console.log(`[Init] Colors found: ${colorOptions.length}`);
 
@@ -431,6 +433,7 @@ glossInput.addEventListener('input', () => {
     }
     langFlag.innerText = detectLanguage(glossInput.value);
     sendBtn.disabled = glossInput.value.trim().length === 0;
+    updateCharCounter();
 });
 
 glossInput.addEventListener('keydown', (e) => {
@@ -546,22 +549,38 @@ let _saveTimer = null;
 function saveSessions() {
     renderSidebar();
     if (_saveTimer) clearTimeout(_saveTimer);
-    _saveTimer = setTimeout(async () => {
-        try {
-            await fetch('/api/v1/sessions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(sessions)
-            });
-        } catch (e) {
-            console.error('[Storage] Save failed:', e);
-        }
-    }, 300);
+    _saveTimer = setTimeout(_flushSessions, 300);
 }
 
+async function _flushSessions() {
+    _saveTimer = null;
+    try {
+        await fetch('/api/v1/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(sessions)
+        });
+    } catch (e) {
+        console.error('[Storage] Save failed:', e);
+    }
+}
+
+// Prevent data loss on tab close
+window.addEventListener('beforeunload', () => {
+    if (_saveTimer) {
+        clearTimeout(_saveTimer);
+        _saveTimer = null;
+        navigator.sendBeacon('/api/v1/sessions', new Blob([JSON.stringify(sessions)], { type: 'application/json' }));
+    }
+});
+
+
+function _uid(prefix) {
+    return prefix + crypto.randomUUID();
+}
 
 function startNewSession() {
-    currentSessionId = 'sess_' + Date.now();
+    currentSessionId = _uid('sess_');
     sessions.unshift({ id: currentSessionId, title: t('newChatTitle'), messages: [] });
     if (sessions.length > 1000) sessions = sessions.slice(0, 1000);
     saveSessions();
@@ -587,8 +606,12 @@ async function initSession() {
         } else if (localData) {
             console.log('[Storage] Migrating localStorage to server...');
             sessions = JSON.parse(localData);
-            await saveSessions();
-            localStorage.removeItem(HISTORY_KEY);
+            try {
+                await _flushSessions();
+                localStorage.removeItem(HISTORY_KEY);
+            } catch(e) {
+                console.error('[Storage] Migration save failed, keeping localStorage');
+            }
         }
     } catch (e) {
         console.error('[Storage] Init failed:', e);
@@ -646,7 +669,7 @@ function renameSession(e, id) {
         titleDiv.contentEditable = "false";
         titleDiv.style.background = "transparent";
         titleDiv.style.outline = "none";
-        const newTitle = titleDiv.innerText.trim();
+        const newTitle = titleDiv.innerText.trim().slice(0, 100);
         if (newTitle && newTitle !== session.title) {
             session.title = newTitle;
             saveSessions();
@@ -712,6 +735,47 @@ function setupAutoResize() {
 
 function scrollToBottom() {
     chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'smooth' });
+}
+
+// --- Character Counter ---
+function updateCharCounter() {
+    const len = glossInput.value.length;
+    charCounter.textContent = `${len}/${MAX_TEXT_LENGTH}`;
+    charCounter.classList.toggle('warn', len >= 400 && len < 470);
+    charCounter.classList.toggle('danger', len >= 470);
+}
+
+// --- Scroll-to-bottom button ---
+let _unreadCount = 0;
+function updateScrollBtn() {
+    const el = chatMessages;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    scrollBottomBtn.classList.toggle('visible', !atBottom);
+    if (atBottom) {
+        _unreadCount = 0;
+        const badge = scrollBottomBtn.querySelector('.scroll-badge');
+        if (badge) badge.remove();
+    }
+}
+chatMessages.addEventListener('scroll', updateScrollBtn);
+scrollBottomBtn.addEventListener('click', () => {
+    scrollToBottom();
+    _unreadCount = 0;
+    const badge = scrollBottomBtn.querySelector('.scroll-badge');
+    if (badge) badge.remove();
+});
+function bumpUnread() {
+    const el = chatMessages;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (atBottom) return;
+    _unreadCount++;
+    let badge = scrollBottomBtn.querySelector('.scroll-badge');
+    if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'scroll-badge';
+        scrollBottomBtn.appendChild(badge);
+    }
+    badge.textContent = _unreadCount;
 }
 
 function appendUserMessageToDOM(text) {
@@ -828,6 +892,7 @@ function renderSkeleton(bubble) {
     const glossPreview = bubble.querySelector('.gloss-preview');
     const glossHtml = glossPreview ? glossPreview.outerHTML : '';
     bubble.innerHTML = glossHtml + `
+        <div class="typing-dots"><span></span><span></span><span></span></div>
         <div class="skeleton-container">
             <div class="skeleton-shimmer"></div>
             <div class="status-container">
@@ -938,6 +1003,7 @@ async function triggerGenerate() {
     session.messages.push({ role: 'user', content: text, timestamp: Date.now() });
     appendUserMessageToDOM(text);
     SoundFX.playPop();
+    bumpUnread();
 
     // Emercom mode: convert text → glosses
     let glossText = text;
@@ -954,7 +1020,7 @@ async function triggerGenerate() {
         }
     }
 
-    const msgId = 'msg_' + Date.now();
+    const msgId = _uid('msg_');
     const assistantMsgData = { role: 'assistant', msgId: msgId, glosses: glossText, timestamp: Date.now(), taskId: null, bgColor: selectedBgColor, avatar: selectedAvatar, mode: currentMode };
     session.messages.push(assistantMsgData);
     saveSessions();
@@ -1012,6 +1078,8 @@ async function triggerFetch(text, msgId, bubbleNode, overrideBg, overrideAvatar,
 }
 
 function attachTaskListener(taskId, msgId, bubbleNode) {
+    // Track which session this listener belongs to
+    const ownerSessionId = currentSessionId;
     // If it's a restore, the skeleton might be missing
     if (!bubbleNode.querySelector('.skeleton-container')) {
         renderSkeleton(bubbleNode);
@@ -1122,6 +1190,7 @@ function updateSessionParam(msgId, data, shouldSyncToServer = true) {
     const session = sessions.find(s => s.id === currentSessionId);
     if (session) msg = session.messages.find(m => m.msgId === msgId);
     if (!msg) {
+        // Fallback: search all sessions (task may belong to a different one)
         for (const s of sessions) {
             msg = s.messages.find(m => m.msgId === msgId);
             if (msg) break;
