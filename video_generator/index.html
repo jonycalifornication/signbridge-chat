@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="kk">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -75,8 +75,8 @@
         
         .welcome-screen .logo { margin-bottom: 24px; animation: floatLogo 4s ease-in-out infinite; }
         .welcome-screen .logo svg { width: 72px; height: 72px; }
-        .hand-wave { transform-origin: 70% 80%; animation: waveHand 2.5s ease-in-out infinite; }
-        @keyframes waveHand { 0% { transform: rotate(0deg); } 10% { transform: rotate(14deg); } 20% { transform: rotate(-8deg); } 30% { transform: rotate(14deg); } 40% { transform: rotate(-4deg); } 50% { transform: rotate(10deg); } 60% { transform: rotate(0deg); } 100% { transform: rotate(0deg); } }
+        .hand-ily { animation: ilyPulse 3s ease-in-out infinite; }
+        @keyframes ilyPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
         .welcome-screen h2 { color: var(--text-main); margin-bottom: 12px; font-weight: 700; font-size: 32px; letter-spacing: -0.5px; }
         .welcome-screen p { color: var(--text-muted); max-width: 440px; margin: 0 auto; line-height: 1.6; }
 
@@ -278,12 +278,12 @@
         <div class="sidebar">
             <a href="/" class="back-link">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-                В панель
+                <span data-i18n="backLink">Панельге</span>
             </a>
             
             <button id="new-chat-btn" class="new-chat-btn">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                Новый перевод
+                <span data-i18n="newChat">Жаңа аударма</span>
             </button>
             
             <div class="history-list" id="history-list">
@@ -293,17 +293,22 @@
             <div class="mode-toggle" id="mode-toggle">
                 <button class="mode-toggle-btn active" data-mode="normal">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                    Обычный
+                    <span data-i18n="modeNormal">Қарапайым</span>
                 </button>
                 <button class="mode-toggle-btn" data-mode="emercom">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-                    МЧС
+                    <span data-i18n="modeEmercom">ТЖД</span>
                 </button>
             </div>
             
+            <button id="lang-toggle" class="theme-toggle" style="margin-bottom: 4px;">
+                <span style="font-size: 16px;">🇰🇿</span>
+                <span data-i18n="langToggle">Қазақша</span>
+            </button>
+
             <button id="theme-toggle" class="theme-toggle">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sun-icon"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
-                <span>Переключить тему</span>
+                <span data-i18n="themeToggle">Түнгі режим</span>
             </button>
         </div>
 
@@ -314,27 +319,36 @@
                 <div class="welcome-content">
                     <div class="logo">
                         <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <g class="hand-wave">
-                                <circle cx="50" cy="38" r="8" fill="#FBBF24"/>
-                                <rect x="46" y="45" width="8" height="22" rx="4" fill="#FBBF24"/>
-                                <rect x="36" y="30" width="6" height="20" rx="3" fill="#FBBF24" transform="rotate(-15 39 40)"/>
-                                <rect x="44" y="24" width="6" height="22" rx="3" fill="#FCD34D"/>
-                                <rect x="52" y="22" width="6" height="23" rx="3" fill="#FBBF24"/>
-                                <rect x="60" y="26" width="6" height="20" rx="3" fill="#FCD34D" transform="rotate(10 63 36)"/>
-                                <rect x="67" y="33" width="5" height="14" rx="2.5" fill="#FBBF24" transform="rotate(20 69 40)"/>
-                                <rect x="38" y="58" width="24" height="10" rx="5" fill="#FBBF24"/>
-                                <path d="M38 68 Q42 80 50 82 Q58 80 62 68" fill="#FBBF24"/>
+                            <g class="hand-ily">
+                                <!-- Palm -->
+                                <rect x="35" y="52" width="30" height="28" rx="6" fill="#FBBF24"/>
+                                <path d="M35 65 Q32 72 35 80" stroke="#F59E0B" stroke-width="1" fill="none"/>
+                                <!-- Thumb (out to the side) -->
+                                <rect x="24" y="50" width="14" height="7" rx="3.5" fill="#FCD34D"/>
+                                <circle cx="24" cy="53.5" r="3.5" fill="#FCD34D"/>
+                                <!-- Pinky finger (up) -->
+                                <rect x="58" y="22" width="7" height="32" rx="3.5" fill="#FCD34D"/>
+                                <circle cx="61.5" cy="22" r="3.5" fill="#FCD34D"/>
+                                <!-- Index finger (up) -->
+                                <rect x="35" y="20" width="7" height="34" rx="3.5" fill="#FBBF24"/>
+                                <circle cx="38.5" cy="20" r="3.5" fill="#FBBF24"/>
+                                <!-- Ring finger (folded) -->
+                                <rect x="51" y="44" width="7" height="12" rx="3.5" fill="#F59E0B"/>
+                                <!-- Middle finger (folded) -->
+                                <rect x="43" y="43" width="7" height="13" rx="3.5" fill="#F59E0B"/>
+                                <!-- Wrist -->
+                                <rect x="38" y="78" width="24" height="8" rx="4" fill="#FBBF24"/>
                             </g>
                         </svg>
                     </div>
                     <h2>SignBridge AI</h2>
-                    <p>Напишите текст на любом языке, и 3D-аватар переведет его на язык жестов.</p>
+                    <p data-i18n="welcomeText">Кез келген тілде мәтін жазыңыз, 3D-аватар оны ым тіліне аударады.</p>
                     <div class="quick-phrases" id="quick-phrases">
-                        <button class="phrase-chip" data-text="Привет">👋 Привет</button>
-                        <button class="phrase-chip" data-text="Спасибо">🙏 Спасибо</button>
-                        <button class="phrase-chip" data-text="Как дела?">😊 Как дела?</button>
-                        <button class="phrase-chip" data-text="Помогите">🆘 Помогите</button>
-                        <button class="phrase-chip" data-text="До свидания">✌️ До свидания</button>
+                        <button class="phrase-chip" data-text="Сәлем" data-text-ru="Привет" data-i18n="chipHello">👋 Сәлем</button>
+                        <button class="phrase-chip" data-text="Рахмет" data-text-ru="Спасибо" data-i18n="chipThanks">🙏 Рахмет</button>
+                        <button class="phrase-chip" data-text="Қалдарыңыз қалай?" data-text-ru="Как дела?" data-i18n="chipHowAreYou">😊 Қалдарыңыз қалай?</button>
+                        <button class="phrase-chip" data-text="Көмектесіңіз" data-text-ru="Помогите" data-i18n="chipHelp">🆘 Көмектесіңіз</button>
+                        <button class="phrase-chip" data-text="Сау болыңыз" data-text-ru="До свидания" data-i18n="chipBye">✌️ Сау болыңыз</button>
                     </div>
                 </div>
             </div>
@@ -344,11 +358,11 @@
 
             <div class="input-area">
                 <div class="input-wrapper">
-                    <textarea id="gloss-input" rows="1" placeholder="Введите фразу..." maxlength="500"></textarea>
+                    <textarea id="gloss-input" rows="1" data-i18n-placeholder="inputPlaceholder" placeholder="Фразаны енгізіңіз..." maxlength="500"></textarea>
                     
                     <span id="lang-flag" class="lang-flag"></span>
 
-                    <button id="avatar-selector-btn" class="icon-toggle-btn" title="Выбор персонажа">
+                    <button id="avatar-selector-btn" class="icon-toggle-btn" data-i18n-title="avatarSelect" title="Кейіпкерді таңдау">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
                     </button>
 
@@ -356,24 +370,24 @@
                         <div class="avatar-card active" data-avatar="Aibek">
                             <div class="avatar-img">👤</div>
                             <div class="avatar-info">
-                                <b>Айназ</b>
-                                <span>Базовая модель</span>
+                                <b data-i18n="avatarName">Айназ</b>
+                                <span data-i18n="avatarDesc">Негізгі модель</span>
                             </div>
                         </div>
-                        <div class="coming-soon">
-                            Скоро будет больше аватаров...
+                        <div class="coming-soon" data-i18n="comingSoon">
+                            Көбірек аватарлар жақында...
                         </div>
                     </div>
 
-                    <button id="bg-selector-btn" class="icon-toggle-btn" title="Цвет фона">
+                    <button id="bg-selector-btn" class="icon-toggle-btn" data-i18n-title="bgSelect" title="Фон түсі">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
                     </button>
                     
                     <div id="bg-popover" class="bg-popover">
-                        <button class="color-option active" data-color="white" title="Белый"><span class="color-swatch" style="background: white;"></span></button>
-                        <button class="color-option" data-color="green" title="Зеленый хромакей"><span class="color-swatch" style="background: #00FF00;"></span></button>
-                        <button class="color-option" data-color="#1F2937" title="Темный"><span class="color-swatch" style="background: #1F2937;"></span></button>
-                        <button class="color-option" data-color="transparent" title="Прозрачный"><span class="color-swatch" style="background: repeating-conic-gradient(#e5e7eb 0% 25%, white 0% 50%) 50% / 8px 8px;"></span></button>
+                        <button class="color-option active" data-color="white" data-i18n-title="colorWhite" title="Ақ"><span class="color-swatch" style="background: white;"></span></button>
+                        <button class="color-option" data-color="green" data-i18n-title="colorGreen" title="Жасыл хромакей"><span class="color-swatch" style="background: #00FF00;"></span></button>
+                        <button class="color-option" data-color="#1F2937" data-i18n-title="colorDark" title="Қараңғы"><span class="color-swatch" style="background: #1F2937;"></span></button>
+                        <button class="color-option" data-color="transparent" data-i18n-title="colorTransparent" title="Мөлдір"><span class="color-swatch" style="background: repeating-conic-gradient(#e5e7eb 0% 25%, white 0% 50%) 50% / 8px 8px;"></span></button>
                     </div>
 
                     <button id="send-btn" class="send-btn" disabled>

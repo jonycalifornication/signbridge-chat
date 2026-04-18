@@ -2,6 +2,157 @@ import { loadDictionary, textToGlosses, detectDictLang } from './emercom-glosser
 
 console.log('🚀 SignBridge Loading System Components...');
 
+// --- i18n ---
+const LANG_KEY = 'signbridge_lang';
+let currentLang = localStorage.getItem(LANG_KEY) || 'kk';
+
+const i18n = {
+    kk: {
+        backLink: 'Панельге',
+        newChat: 'Жаңа аударма',
+        modeNormal: 'Қарапайым',
+        modeEmercom: 'ТЖД',
+        themeToggle: 'Түнгі режим',
+        themeToggleLight: 'Күндізгі режим',
+        langToggle: 'Қазақша',
+        welcomeText: 'Кез келген тілде мәтін жазыңыз, 3D-аватар оны ым тіліне аударады.',
+        inputPlaceholder: 'Фразаны енгізіңіз...',
+        avatarSelect: 'Кейіпкерді таңдау',
+        avatarName: 'Айназ',
+        avatarDesc: 'Негізгі модель',
+        comingSoon: 'Көбірек аватарлар жақында...',
+        bgSelect: 'Фон түсі',
+        colorWhite: 'Ақ',
+        colorGreen: 'Жасыл хромакей',
+        colorDark: 'Қараңғы',
+        colorTransparent: 'Мөлдір',
+        chipHello: '👋 Сәлем',
+        chipThanks: '🙏 Рахмет',
+        chipHowAreYou: '😊 Қалдарыңыз қалай?',
+        chipHelp: '🆘 Көмектесіңіз',
+        chipBye: '✌️ Сау болыңыз',
+        chipTextHello: 'Сәлем',
+        chipTextThanks: 'Рахмет',
+        chipTextHowAreYou: 'Қалдарыңыз қалай?',
+        chipTextHelp: 'Көмектесіңіз',
+        chipTextBye: 'Сау болыңыз',
+        newChatTitle: 'Жаңа чат',
+        rename: 'Атын өзгерту',
+        deleteChat: 'Чатты жою',
+        download: 'Жүктеу',
+        genTime: '⚡ ${sec} секундта жасалды',
+        glossLabel: 'Глосстар:',
+        videoExpired: '⏳ Видео орын үнемдеу үшін жойылды',
+        regenerate: '🔄 Қайта жасау',
+        stepTranslate: 'Аударма',
+        stepAnimate: 'Анимация',
+        stepRender: 'Рендер',
+        stepDone: 'Дайын',
+        statusInit: 'Нейро-байланыс орнатылуда...',
+        error: '❌ Қате: ',
+        tabReady: '✅ Видео дайын! — SignBridge',
+        taskExpired: '⏳ Тапсырма мерзімі аяқталды',
+        reconnecting: 'Қайта қосылу (${count}/${max})...',
+        connectionLost: '⚠️ Байланыс үзілді... (бетті жаңартыңыз)',
+    },
+    ru: {
+        backLink: 'В панель',
+        newChat: 'Новый перевод',
+        modeNormal: 'Обычный',
+        modeEmercom: 'МЧС',
+        themeToggle: 'Тёмная тема',
+        themeToggleLight: 'Светлая тема',
+        langToggle: 'Русский',
+        welcomeText: 'Напишите текст на любом языке, и 3D-аватар переведет его на язык жестов.',
+        inputPlaceholder: 'Введите фразу...',
+        avatarSelect: 'Выбор персонажа',
+        avatarName: 'Айназ',
+        avatarDesc: 'Базовая модель',
+        comingSoon: 'Скоро будет больше аватаров...',
+        bgSelect: 'Цвет фона',
+        colorWhite: 'Белый',
+        colorGreen: 'Зеленый хромакей',
+        colorDark: 'Темный',
+        colorTransparent: 'Прозрачный',
+        chipHello: '👋 Привет',
+        chipThanks: '🙏 Спасибо',
+        chipHowAreYou: '😊 Как дела?',
+        chipHelp: '🆘 Помогите',
+        chipBye: '✌️ До свидания',
+        chipTextHello: 'Привет',
+        chipTextThanks: 'Спасибо',
+        chipTextHowAreYou: 'Как дела?',
+        chipTextHelp: 'Помогите',
+        chipTextBye: 'До свидания',
+        newChatTitle: 'Новый чат',
+        rename: 'Переименовать',
+        deleteChat: 'Удалить чат',
+        download: 'Скачать',
+        genTime: '⚡ Сгенерировано за ${sec}с',
+        glossLabel: 'Глоссы:',
+        videoExpired: '⏳ Видео удалено для экономии места',
+        regenerate: '🔄 Сгенерировать заново',
+        stepTranslate: 'Перевод',
+        stepAnimate: 'Анимация',
+        stepRender: 'Рендер',
+        stepDone: 'Готово',
+        statusInit: 'Устанавливаем нейро-контакт...',
+        error: '❌ Ошибка: ',
+        tabReady: '✅ Видео готово! — SignBridge',
+        taskExpired: '⏳ Задача истекла',
+        reconnecting: 'Переподключение (${count}/${max})...',
+        connectionLost: '⚠️ Связь прервана... (обновите страницу)',
+    }
+};
+
+function t(key, params) {
+    let str = i18n[currentLang]?.[key] || i18n.kk[key] || key;
+    if (params) {
+        for (const [k, v] of Object.entries(params)) {
+            str = str.replace('${' + k + '}', v);
+        }
+    }
+    return str;
+}
+
+function applyLanguage(lang) {
+    currentLang = lang;
+    localStorage.setItem(LANG_KEY, lang);
+    document.documentElement.lang = lang;
+
+    // Update all data-i18n elements
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        el.textContent = t(el.dataset.i18n);
+    });
+    // Update placeholders
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+        el.placeholder = t(el.dataset.i18nPlaceholder);
+    });
+    // Update titles
+    document.querySelectorAll('[data-i18n-title]').forEach(el => {
+        el.title = t(el.dataset.i18nTitle);
+    });
+    // Update phrase chip data-text
+    const chipMap = { chipHello: 'chipTextHello', chipThanks: 'chipTextThanks', chipHowAreYou: 'chipTextHowAreYou', chipHelp: 'chipTextHelp', chipBye: 'chipTextBye' };
+    document.querySelectorAll('.phrase-chip[data-i18n]').forEach(chip => {
+        const textKey = chipMap[chip.dataset.i18n];
+        if (textKey) chip.dataset.text = t(textKey);
+    });
+    // Update lang toggle button flag + text
+    const langBtn = document.getElementById('lang-toggle');
+    if (langBtn) {
+        const flag = langBtn.querySelector('span:first-child');
+        if (flag) flag.textContent = lang === 'kk' ? '🇰🇿' : '🇷🇺';
+    }
+    updateThemeToggleText();
+}
+
+function updateThemeToggleText() {
+    const isDark = document.body.getAttribute('data-theme') === 'dark';
+    const el = document.querySelector('#theme-toggle [data-i18n="themeToggle"]');
+    if (el) el.textContent = isDark ? t('themeToggleLight') : t('themeToggle');
+}
+
 const getEl = (id) => {
     const el = document.getElementById(id);
     if (!el) {
@@ -24,6 +175,7 @@ const colorOptions = document.querySelectorAll('.color-option');
 const avatarSelectorBtn = getEl('avatar-selector-btn');
 const avatarPopover = getEl('avatar-popover');
 const themeToggle = getEl('theme-toggle');
+const langToggle = getEl('lang-toggle');
 const langFlag = getEl('lang-flag');
 const modeToggle = getEl('mode-toggle');
 
@@ -189,6 +341,8 @@ function sanitizeUrl(url) {
 async function init() {
     console.log('[System] Initializing theme...');
     initTheme();
+    console.log('[System] Initializing language...');
+    applyLanguage(currentLang);
     console.log('[System] Initializing particles...');
     initParticles();
     console.log('[System] Initializing sessions from server...');
@@ -317,7 +471,15 @@ themeToggle.addEventListener('click', () => {
     const newTheme = isDark ? 'light' : 'dark';
     document.body.setAttribute('data-theme', newTheme);
     localStorage.setItem(THEME_KEY, newTheme);
+    updateThemeToggleText();
 });
+
+// --- Language Toggle ---
+if (langToggle) {
+    langToggle.addEventListener('click', () => {
+        applyLanguage(currentLang === 'kk' ? 'ru' : 'kk');
+    });
+}
 
 // --- Language Logic ---
 function detectLanguage(text) {
@@ -400,7 +562,7 @@ function saveSessions() {
 
 function startNewSession() {
     currentSessionId = 'sess_' + Date.now();
-    sessions.unshift({ id: currentSessionId, title: "Новый чат", messages: [] });
+    sessions.unshift({ id: currentSessionId, title: t('newChatTitle'), messages: [] });
     if (sessions.length > 1000) sessions = sessions.slice(0, 1000);
     saveSessions();
 
@@ -505,10 +667,10 @@ function renderSidebar() {
         div.innerHTML = `
             <div class="history-item-title">${escapeHtml(session.title)}</div>
             <div class="history-item-actions">
-                <button class="action-btn rename-btn" title="Переименовать">
+                <button class="action-btn rename-btn" title="${t('rename')}">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                 </button>
-                <button class="action-btn del" title="Удалить чат">
+                <button class="action-btn del" title="${t('deleteChat')}">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2-2v2"></path></svg>
                 </button>
             </div>
@@ -579,7 +741,7 @@ function appendAssistantMessageToDOM(msgData) {
         attachTaskListener(msgData.taskId, msgData.msgId, bubble);
     } else if (msgData.error) {
         const gpHtml = bubble.querySelector('.gloss-preview')?.outerHTML || '';
-        bubble.innerHTML = gpHtml + `<span class="error-text">❌ Ошибка: ${escapeHtml(msgData.error)}</span>`;
+        bubble.innerHTML = gpHtml + `<span class="error-text">${t('error')}${escapeHtml(msgData.error)}</span>`;
     }
     
     row.appendChild(bubble);
@@ -591,12 +753,12 @@ function appendAssistantMessageToDOM(msgData) {
 function renderVideoToBubble(bubble, url, preserveGlossPreview, durationSec) {
     const safeUrl = sanitizeUrl(url);
     const glossHtml = preserveGlossPreview ? preserveGlossPreview.outerHTML : '';
-    const timeHtml = durationSec ? `<div class="gen-time">⚡ Сгенерировано за ${durationSec}с</div>` : '';
+    const timeHtml = durationSec ? `<div class="gen-time">${t('genTime', { sec: durationSec })}</div>` : '';
     bubble.innerHTML = glossHtml + `
         <div class="video-wrapper">
             <div class="video-container">
                 <video controls autoplay loop playsinline><source src="${safeUrl}" type="video/webm"></video>
-                <a href="${safeUrl}" download="signbridge_video.webm" class="download-btn">Скачать</a>
+                <a href="${safeUrl}" download="signbridge_video.webm" class="download-btn">${t('download')}</a>
             </div>
         </div>
         <div class="speed-controls">
@@ -630,10 +792,10 @@ function renderVideoToBubble(bubble, url, preserveGlossPreview, durationSec) {
             if (wrapper) {
                 const block = document.createElement('div');
                 block.className = 'expired-block';
-                block.innerHTML = '<p>⏳ Видео удалено для экономии места</p>';
+                block.innerHTML = `<p>${t('videoExpired')}</p>`;
                 const btn = document.createElement('button');
                 btn.className = 'regenerate-btn';
-                btn.textContent = '🔄 Сгенерировать заново';
+                btn.textContent = t('regenerate');
                 btn.addEventListener('click', () => regenerateVideo(msgId, glosses));
                 block.appendChild(btn);
                 wrapper.replaceWith(block);
@@ -646,10 +808,10 @@ function renderVideoToBubble(bubble, url, preserveGlossPreview, durationSec) {
 function renderGlossPreview(bubble, tokens) {
     const div = document.createElement('div');
     div.className = 'gloss-preview';
-    div.innerHTML = '<span class="gloss-label">Глоссы:</span> ' +
-        tokens.map(t => {
-            const cls = t.matched ? 'matched' : 'unmatched';
-            return `<span class="gloss-token ${cls}" title="${escapeHtml(t.original)}">${escapeHtml(t.gloss)}</span>`;
+    div.innerHTML = '<span class="gloss-label">' + t('glossLabel') + '</span> ' +
+        tokens.map(tk => {
+            const cls = tk.matched ? 'matched' : 'unmatched';
+            return `<span class="gloss-token ${cls}" title="${escapeHtml(tk.original)}">${escapeHtml(tk.gloss)}</span>`;
         }).join(' ');
     bubble.prepend(div);
 }
@@ -657,7 +819,7 @@ function renderGlossPreview(bubble, tokens) {
 function renderGlossPreviewSimple(bubble, glossText) {
     const div = document.createElement('div');
     div.className = 'gloss-preview';
-    div.innerHTML = '<span class="gloss-label">Глоссы:</span> ' + escapeHtml(glossText);
+    div.innerHTML = '<span class="gloss-label">' + t('glossLabel') + '</span> ' + escapeHtml(glossText);
     bubble.prepend(div);
 }
 
@@ -679,13 +841,13 @@ function renderSkeleton(bubble) {
                     <div class="step-node" data-step="3">✓</div>
                 </div>
                 <div class="step-labels">
-                    <span class="step-label active" data-step="0">Перевод</span>
-                    <span class="step-label" data-step="1">Анимация</span>
-                    <span class="step-label" data-step="2">Рендер</span>
-                    <span class="step-label" data-step="3">Готово</span>
+                    <span class="step-label active" data-step="0">${t('stepTranslate')}</span>
+                    <span class="step-label" data-step="1">${t('stepAnimate')}</span>
+                    <span class="step-label" data-step="2">${t('stepRender')}</span>
+                    <span class="step-label" data-step="3">${t('stepDone')}</span>
                 </div>
                 <span class="spinner"></span>
-                <span class="status-text-anim">Устанавливаем нейро-контакт...</span>
+                <span class="status-text-anim">${t('statusInit')}</span>
             </div>
         </div>
     `;
@@ -845,7 +1007,7 @@ async function triggerFetch(text, msgId, bubbleNode, overrideBg, overrideAvatar,
 
         updateSessionParam(msgId, { error: err.message, videoUrl: null });
         const gp = bubbleNode.querySelector('.gloss-preview');
-        bubbleNode.innerHTML = (gp ? gp.outerHTML : '') + `<span class="error-text">❌ Ошибка: ${escapeHtml(err.message)}</span>`;
+        bubbleNode.innerHTML = (gp ? gp.outerHTML : '') + `<span class="error-text">${t('error')}${escapeHtml(err.message)}</span>`;
     }
 }
 
@@ -871,7 +1033,7 @@ function attachTaskListener(taskId, msgId, bubbleNode) {
                 activeEventSources.delete(es);
                 updateSessionParam(msgId, { error: sseData.error, videoUrl: null, taskId: null });
                 const gp = bubbleNode.querySelector('.gloss-preview');
-                bubbleNode.innerHTML = (gp ? gp.outerHTML : '') + `<span class="error-text">❌ Ошибка: ${escapeHtml(sseData.error)}</span>`;
+                bubbleNode.innerHTML = (gp ? gp.outerHTML : '') + `<span class="error-text">${t('error')}${escapeHtml(sseData.error)}</span>`;
                 return;
             }
 
@@ -893,7 +1055,7 @@ function attachTaskListener(taskId, msgId, bubbleNode) {
                 // Tab title notification
                 if (document.hidden) {
                     const originalTitle = document.title;
-                    document.title = '✅ Видео готово! — SignBridge';
+                    document.title = t('tabReady');
                     const restoreTitle = () => { document.title = originalTitle; document.removeEventListener('visibilitychange', restoreTitle); };
                     document.addEventListener('visibilitychange', restoreTitle);
                 }
@@ -926,10 +1088,10 @@ function attachTaskListener(taskId, msgId, bubbleNode) {
                     const gpHtml = gp ? gp.outerHTML : '';
                     const block = document.createElement('div');
                     block.className = 'expired-block';
-                    block.innerHTML = '<p>⏳ Задача истекла</p>';
+                    block.innerHTML = `<p>${t('taskExpired')}</p>`;
                     const btn = document.createElement('button');
                     btn.className = 'regenerate-btn';
-                    btn.textContent = '🔄 Сгенерировать заново';
+                    btn.textContent = t('regenerate');
                     btn.addEventListener('click', () => regenerateVideo(msgId, glosses));
                     block.appendChild(btn);
                     bubbleNode.innerHTML = gpHtml;
@@ -944,10 +1106,10 @@ function attachTaskListener(taskId, msgId, bubbleNode) {
 
             if (retryCount <= maxRetries) {
                 console.log(`[SSE] Reconnecting (${retryCount}/${maxRetries})...`);
-                if (statusTextNode) statusTextNode.innerText = `Переподключение (${retryCount}/${maxRetries})...`;
+                if (statusTextNode) statusTextNode.innerText = t('reconnecting', { count: retryCount, max: maxRetries });
                 setTimeout(connectSSE, 2000 * retryCount);
             } else if (statusTextNode) {
-                statusTextNode.innerHTML = `<span style="color:var(--text-muted)">⚠️ Связь прервана... (обновите страницу)</span>`;
+                statusTextNode.innerHTML = `<span style="color:var(--text-muted)">${t('connectionLost')}</span>`;
             }
         };
     }
