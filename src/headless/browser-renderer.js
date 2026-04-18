@@ -116,7 +116,10 @@ class HeadlessRenderer extends AvatarWidget {
         let virtualTime = 0;
         const pendingTimeouts = [];
         let rafIdx = 0;
-        
+        let isEncoding = true;
+        let frameCount = 0;
+
+        try {
         window.setTimeout = (cb, delay) => {
             const id = ++rafIdx;
             pendingTimeouts.push({ id, cb, fireAt: virtualTime + (delay || 0) });
@@ -138,10 +141,6 @@ class HeadlessRenderer extends AvatarWidget {
             rafCb = cb;
             return ++rafIdx;
         };
-
-        // Execution flags
-        let isEncoding = true;
-        let frameCount = 0;
 
         // Background deterministic loop
         const encodingPromise = (async () => {
@@ -168,11 +167,13 @@ class HeadlessRenderer extends AvatarWidget {
                      const frame = new VideoFrame(bitmap, { timestamp: frameCount * 1_000_000 / framerate });
                      videoEncoder.encode(frame, { keyFrame: frameCount % 30 === 0 });
                      frame.close();
+                     bitmap.close();
                      frameCount++;
                      
                      if (frameCount % 60 === 0 && window.reportProgress) {
-                         // Math trick to keep progress between 50 and 80 roughly
-                         window.reportProgress(50 + Math.min(25, (frameCount/30)), `Синтезируем движения: кадр ${frameCount} ⚡`);
+                         // Scale progress 50→75 logarithmically so it never truly stalls
+                         const renderPct = 50 + 25 * (1 - 1 / (1 + frameCount / 300));
+                         window.reportProgress(Math.round(renderPct), `Синтезируем движения: кадр ${frameCount} ⚡`);
                      }
                  }
                  
@@ -207,13 +208,22 @@ class HeadlessRenderer extends AvatarWidget {
         await videoEncoder.flush();
         videoEncoder.close();
         muxer.finalize();
-        
-        window.setTimeout = originalSetTimeout;
-        window.clearTimeout = originalClearTimeout;
-        window.requestAnimationFrame = originalRAF;
-        Date.now = originalDateNow;
-        performance.now = originalPerfNow;
-        if (this.clock) this.clock.getDelta = originalClockDelta;
+        } finally {
+            // Stop encoding loop in case of error
+            isEncoding = false;
+            pendingTimeouts.length = 0;
+            // Always restore native APIs
+            window.setTimeout = originalSetTimeout;
+            window.clearTimeout = originalClearTimeout;
+            window.requestAnimationFrame = originalRAF;
+            Date.now = originalDateNow;
+            performance.now = originalPerfNow;
+            if (this.clock) this.clock.getDelta = originalClockDelta;
+            // Close encoder if still open
+            try { if (videoEncoder.state !== 'closed') videoEncoder.close(); } catch(e) {}
+            // Finalize muxer if not yet done
+            try { muxer.finalize(); } catch(e) {}
+        }
 
         const buffer = muxer.target.buffer;
         const blob = new Blob([buffer], { type: 'video/webm' });

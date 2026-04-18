@@ -4,16 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SignBridge Chat</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-
         :root {
             --bg-sidebar: #f9f9f9;
             --bg-chat: #ffffff;
             --border-color: #e5e7eb;
             --text-main: #111827;
             --text-muted: #6b7280;
-            --accent: #111827;
+            --accent: #0d9488;
+            --accent-hover: #0f766e;
+            --accent-light: rgba(13, 148, 136, 0.1);
             --user-bubble: #f3f4f6;
             --input-bg: #ffffff;
         }
@@ -24,7 +25,9 @@
             --border-color: #262626;
             --text-main: #f5f5f5;
             --text-muted: #a3a3a3;
-            --accent: #ffffff;
+            --accent: #2dd4bf;
+            --accent-hover: #5eead4;
+            --accent-light: rgba(45, 212, 191, 0.12);
             --user-bubble: #21262d;
             --input-bg: #1f2937;
         }
@@ -55,8 +58,10 @@
         .history-item:hover, .history-item.active { background: var(--border-color); font-weight: 500; }
         
         /* Welcome Screen (Aurora) */
-        .welcome-screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: linear-gradient(135deg, white 0%, #eff6ff 20%, #fdf4ff 50%, #f3e8ff 80%, white 100%); background-size: 400% 400%; animation: auroraBackground 12s ease infinite; z-index: 5; transition: opacity 0.6s ease, visibility 0.6s; border-top-left-radius: 12px; }
-        body[data-theme="dark"] .welcome-screen { background: linear-gradient(135deg, #0b0d11 0%, #1e1b4b 25%, #312e81 50%, #1e1b4b 75%, #0b0d11 100%); }
+        .welcome-screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: var(--bg-chat); z-index: 5; transition: opacity 0.6s ease, visibility 0.6s, background 0.3s; border-top-left-radius: 12px; }
+        #particle-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+        .welcome-screen .welcome-content { position: relative; z-index: 1; }
+        body[data-theme="dark"] .welcome-screen { background: #0b0d11; }
         
         .history-item-actions { display: flex; gap: 6px; opacity: 0; transition: opacity 0.2s; }
         .history-item:hover .history-item-actions { opacity: 1; }
@@ -64,19 +69,23 @@
         .action-btn:hover { color: var(--text-main); }
         .action-btn.del:hover { color: #dc2626; }
 
-        .lang-flag { font-size: 16px; margin-right: 8px; }
-
         /* Main Chat Area */
         .main-col { flex: 1; display: flex; flex-direction: column; position: relative; }
         .chat-messages { flex: 1; overflow-y: auto; padding: 20px 40px; display: flex; flex-direction: column; scroll-behavior: smooth; position: relative; }
         
-        /* Welcome Screen (Aurora) */
-        .welcome-screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: linear-gradient(135deg, #ffffff 0%, #eff6ff 20%, #fdf4ff 50%, #f3e8ff 80%, #ffffff 100%); background-size: 400% 400%; animation: auroraBackground 12s ease infinite; z-index: 5; transition: opacity 0.6s ease, visibility 0.6s; border-top-left-radius: 12px; }
-        .welcome-screen .logo { font-size: 56px; margin-bottom: 24px; animation: floatLogo 4s ease-in-out infinite; }
+        .welcome-screen .logo { margin-bottom: 24px; animation: floatLogo 4s ease-in-out infinite; }
+        .welcome-screen .logo svg { width: 72px; height: 72px; }
+        .hand-wave { transform-origin: 70% 80%; animation: waveHand 2.5s ease-in-out infinite; }
+        @keyframes waveHand { 0% { transform: rotate(0deg); } 10% { transform: rotate(14deg); } 20% { transform: rotate(-8deg); } 30% { transform: rotate(14deg); } 40% { transform: rotate(-4deg); } 50% { transform: rotate(10deg); } 60% { transform: rotate(0deg); } 100% { transform: rotate(0deg); } }
         .welcome-screen h2 { color: var(--text-main); margin-bottom: 12px; font-weight: 700; font-size: 32px; letter-spacing: -0.5px; }
         .welcome-screen p { color: var(--text-muted); max-width: 440px; margin: 0 auto; line-height: 1.6; }
 
-        @keyframes auroraBackground { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+        /* Quick Phrase Chips */
+        .quick-phrases { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 20px; max-width: 440px; }
+        .phrase-chip { padding: 8px 16px; border-radius: 20px; border: 1px solid var(--border-color); background: var(--input-bg); color: var(--text-main); font-size: 13px; font-family: 'Inter', sans-serif; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+        .phrase-chip:hover { background: var(--accent-light); border-color: var(--accent); color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(13,148,136,0.15); }
+        body[data-theme="dark"] .phrase-chip:hover { box-shadow: 0 4px 12px rgba(45,212,191,0.15); }
+
         @keyframes floatLogo { 0% { transform: translateY(0); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0); } }
         
         /* Chat Bubbles */
@@ -94,9 +103,23 @@
         .message-row.assistant .bubble { background: transparent; color: var(--text-main); padding-left: 0; width: 100%; }
 
         /* Video / Skeleton Containers */
-        .video-container, .skeleton-container { width: 300px; aspect-ratio: 3/4; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-top: 8px; position: relative; border: 1px solid var(--border-color); background: #f3f4f6; transition: background 0.3s ease, border-color 0.3s ease; }
+        .video-wrapper { position: relative; width: 300px; margin-top: 8px; border-radius: 14px; padding: 2px; background: transparent; transition: background 0.3s; }
+        .video-wrapper:hover { background: conic-gradient(from var(--gradient-angle, 0deg), #3b82f6, #a855f7, #ec4899, #f59e0b, #22c55e, #3b82f6); animation: rotateGradient 3s linear infinite; }
+        @property --gradient-angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+        @keyframes rotateGradient { to { --gradient-angle: 360deg; } }
+        .video-container, .skeleton-container { width: 300px; aspect-ratio: 3/4; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); position: relative; border: 1px solid var(--border-color); background: #f3f4f6; transition: background 0.3s ease, border-color 0.3s ease; }
+        .skeleton-container { margin-top: 8px; }
+        .video-wrapper .video-container { width: 100%; margin-top: 0; border: none; }
+        .video-wrapper:hover .video-container { box-shadow: none; }
         body[data-theme="dark"] .video-container, 
         body[data-theme="dark"] .skeleton-container { background: #1f2937; border-color: #374151; }
+
+        /* Speed Controls */
+        .speed-controls { display: flex; gap: 4px; margin-top: 6px; }
+        .speed-btn { padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border-color); background: transparent; color: var(--text-muted); font-size: 12px; font-family: 'Inter', sans-serif; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+        .speed-btn:hover { background: var(--border-color); color: var(--text-main); }
+        .speed-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+        body[data-theme="dark"] .speed-btn.active { color: #ffffff; }
 
         
         .skeleton-container { display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; isolation: isolate; }
@@ -112,11 +135,16 @@
         .download-btn { position: absolute; bottom: 12px; right: 12px; background: rgba(0,0,0,0.6); color: white; border: none; border-radius: 8px; padding: 6px 12px; font-size: 12px; cursor: pointer; backdrop-filter: blur(4px); transition: background 0.2s; text-decoration: none; display: inline-block; font-weight: 500; }
         .download-btn:hover { background: rgba(0,0,0,0.8); }
 
+        /* Generation Time */
+        .gen-time { font-size: 12px; color: var(--text-muted); margin-top: 8px; display: flex; align-items: center; gap: 4px; animation: textFadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+
         /* Expired Video Block */
         .expired-block { width: 300px; background: #f3f4f6; border: 1px dashed var(--border-color); padding: 20px 16px; border-radius: 12px; text-align: center; margin-top: 8px; }
         .expired-block p { color: var(--text-muted); font-size: 13px; margin-bottom: 12px; }
-        .regenerate-btn { background: var(--text-main); color: white; border: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; transition: 0.2s; font-family: 'Inter', sans-serif; font-weight: 500; }
-        .regenerate-btn:hover { background: #374151; transform: translateY(-1px); }
+        .regenerate-btn { background: var(--accent); color: white; border: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; transition: 0.2s; font-family: 'Inter', sans-serif; font-weight: 500; }
+        .regenerate-btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
+        body[data-theme="dark"] .regenerate-btn { background: var(--accent); color: white; }
+        body[data-theme="dark"] .regenerate-btn:hover { background: var(--accent-hover); }
 
         @keyframes popIn {
             0% { transform: scale(0.95); opacity: 0; }
@@ -125,21 +153,54 @@
 
         /* Error Text */
         .error-text { color: #dc2626; font-size: 14px; background: #fef2f2; padding: 8px 12px; border-radius: 8px; border: 1px solid #fecaca; display: inline-block; margin-top: 8px; }
-        .lang-flag { position: absolute; right: 88px; bottom: 14px; font-size: 16px; transition: all 0.2s; pointer-events: none; }
+        body[data-theme="dark"] .error-text { color: #fca5a5; background: #1c1010; border-color: #7f1d1d; }
+        body[data-theme="dark"] .expired-block { background: #1f2937; }
+        body[data-theme="dark"] .skeleton-shimmer { background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent); background-size: 200% 100%; animation: shimmer 1.5s infinite linear; }
 
         /* SSE Status Loader */
         .status-container { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 16px; color: var(--text-main); font-size: 14px; font-weight: 500; text-align: center; padding: 0 20px; transition: color 0.3s ease; }
-        .spinner { width: 24px; height: 24px; border: 3px solid rgba(0,0,0,0.1); border-bottom-color: var(--text-main); border-radius: 50%; box-sizing: border-box; animation: rotation 1s linear infinite; }
+        .spinner { width: 24px; height: 24px; border: 3px solid rgba(0,0,0,0.1); border-bottom-color: var(--accent); border-radius: 50%; box-sizing: border-box; animation: rotation 1s linear infinite; }
         body[data-theme="dark"] .spinner { border-color: rgba(255,255,255,0.1); border-bottom-color: var(--accent); }
 
         @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .status-text-anim { display: inline-block; animation: textFadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
-        @keyframes textFadeUp { 0% { transform: translateY(10px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+        .status-text-anim { display: inline-block; }
+
+        /* Stepper Progress */
+        .stepper { display: flex; align-items: center; gap: 0; width: 240px; margin-bottom: 4px; }
+        .step-node { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--border-color); background: var(--bg-chat); display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--text-muted); flex-shrink: 0; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); position: relative; z-index: 2; }
+        .step-node.active { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); animation: stepPulse 2s ease-in-out infinite; }
+        body[data-theme="dark"] .step-node.active { box-shadow: 0 0 0 3px var(--accent-light); animation: stepPulseDark 2s ease-in-out infinite; }
+        .step-node.done { border-color: #22c55e; background: #22c55e; color: white; }
+        .step-line { flex: 1; height: 2px; background: var(--border-color); position: relative; overflow: hidden; }
+        .step-line-fill { position: absolute; left: 0; top: 0; height: 100%; width: 0%; background: #22c55e; transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
+        .step-labels { display: flex; justify-content: space-between; width: 240px; margin-bottom: 12px; }
+        .step-label { font-size: 10px; color: var(--text-muted); text-align: center; width: 50px; transition: color 0.3s; }
+        .step-label.active { color: var(--accent); font-weight: 600; }
+        .step-label.done { color: #22c55e; }
+        @keyframes stepPulse { 0%, 100% { box-shadow: 0 0 0 3px var(--accent-light); } 50% { box-shadow: 0 0 0 6px rgba(13,148,136,0.05); } }
+        @keyframes stepPulseDark { 0%, 100% { box-shadow: 0 0 0 3px var(--accent-light); } 50% { box-shadow: 0 0 0 6px rgba(45,212,191,0.06); } }
+
+        /* Confetti */
+        .confetti-container { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 20; }
+        .confetti-piece { position: absolute; width: 8px; height: 8px; top: -10px; opacity: 0; animation: confettiFall 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }
+        @keyframes confettiFall {
+            0% { transform: translateY(0) rotate(0deg) scale(1); opacity: 1; }
+            80% { opacity: 1; }
+            100% { transform: translateY(320px) rotate(720deg) scale(0.3); opacity: 0; }
+        }
+
+        /* Gloss Preview (Emercom mode) */
+        .gloss-preview { font-size: 13px; color: var(--text-muted); margin-bottom: 10px; padding: 10px 14px; background: var(--user-bubble); border-radius: 10px; line-height: 1.8; border: 1px solid var(--border-color); }
+        .gloss-label { font-weight: 600; color: var(--text-main); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 4px; }
+        .gloss-token { display: inline-block; padding: 2px 6px; border-radius: 4px; margin: 1px 2px; font-size: 13px; }
+        .gloss-token.matched { background: rgba(34, 197, 94, 0.12); color: #16a34a; font-weight: 500; }
+        body[data-theme="dark"] .gloss-token.matched { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+        .gloss-token.unmatched { color: var(--text-muted); opacity: 0.7; }
 
         /* Input Area */
         .input-area { padding: 24px 40px; background: transparent; display: flex; justify-content: center; position: relative; z-index: 10; }
         .input-wrapper { max-width: 800px; width: 100%; position: relative; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 12px 160px 12px 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); transition: border-color 0.2s; }
-        .input-wrapper:focus-within { border-color: var(--text-muted); }
+        .input-wrapper:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
         
         .icon-toggle-btn { position: absolute; bottom: 8px; width: 32px; height: 32px; border-radius: 8px; background: transparent; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; color: #9ca3af; outline: none; }
         .icon-toggle-btn:hover, .icon-toggle-btn.active { background: #f3f4f6; color: var(--text-main); }
@@ -157,7 +218,7 @@
         .avatar-popover { right: 88px; bottom: 48px; padding: 12px; width: 220px; display: flex; flex-direction: column; gap: 10px; }
 
         .avatar-card { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 10px; border: 1px solid var(--border-color); cursor: pointer; transition: 0.2s; }
-        .avatar-card.active { border-color: var(--text-main); background: var(--border-color); }
+        .avatar-card.active { border-color: var(--accent); background: var(--accent-light); }
         .avatar-img { width: 32px; height: 32px; border-radius: 50%; background: #e5e7eb; display: flex; align-items: center; justify-content: center; font-size: 16px; }
         .avatar-info b { font-size: 13px; display: block; color: var(--text-main); }
         .avatar-info span { font-size: 11px; color: var(--text-muted); }
@@ -172,25 +233,46 @@
         textarea { width: 100%; border: none; outline: none; font-family: 'Inter', sans-serif; font-size: 15px; color: var(--text-main); resize: none; background: transparent; max-height: 200px; min-height: 24px; padding: 0; line-height: 1.5; }
         textarea::placeholder { color: #9ca3af; }
         
-        .send-btn { position: absolute; right: 8px; bottom: 8px; width: 32px; height: 32px; border-radius: 8px; background: var(--accent); color: white; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
-        body[data-theme="dark"] .send-btn { color: #000000; }
-        .send-btn:hover:not(:disabled) { transform: scale(1.05); }
+        .send-btn { position: absolute; right: 8px; bottom: 8px; width: 32px; height: 32px; border-radius: 8px; background: var(--accent); color: white; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; overflow: hidden; }
+        body[data-theme="dark"] .send-btn { color: #ffffff; }
+        .send-btn:hover:not(:disabled) { transform: scale(1.05); background: var(--accent-hover); }
         .send-btn:active:not(:disabled) { transform: scale(0.95); }
         .send-btn:disabled { background: #e5e7eb; color: #9ca3af; cursor: not-allowed; }
         body[data-theme="dark"] .send-btn:disabled { background: #262626; color: #525252; }
-        .send-btn svg { width: 16px; height: 16px; }
+        .send-btn svg { width: 16px; height: 16px; position: relative; z-index: 1; }
+        .ripple { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.4); transform: scale(0); animation: rippleAnim 0.6s ease-out forwards; pointer-events: none; }
+        body[data-theme="dark"] .ripple { background: rgba(255,255,255,0.15); }
+        @keyframes rippleAnim { to { transform: scale(4); opacity: 0; } }
 
+
+        /* Mode Toggle */
+        .mode-toggle { display: flex; background: var(--border-color); border-radius: 8px; padding: 3px; margin-top: 8px; margin-bottom: 8px; }
+        .mode-toggle-btn { flex: 1; padding: 7px 0; font-size: 12px; font-weight: 500; border: none; border-radius: 6px; cursor: pointer; background: transparent; color: var(--text-muted); transition: all 0.25s ease; font-family: 'Inter', sans-serif; display: flex; align-items: center; justify-content: center; gap: 5px; }
+        .mode-toggle-btn.active { background: var(--bg-chat); color: var(--accent); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .mode-toggle-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+        body[data-theme="dark"] .mode-toggle-btn.active { box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
 
         /* Responsive */
+        .mobile-menu-btn { display: none; position: fixed; top: 12px; left: 12px; z-index: 100; width: 36px; height: 36px; border-radius: 8px; background: var(--bg-sidebar); border: 1px solid var(--border-color); cursor: pointer; color: var(--text-main); align-items: center; justify-content: center; }
+        .mobile-menu-btn svg { width: 18px; height: 18px; }
+        .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 90; }
+
         @media (max-width: 768px) {
             .app-layout { flex-direction: column; }
-            .sidebar { width: 100%; height: auto; border-right: none; border-bottom: 1px solid var(--border-color); display: none; }
-            .chat-messages { padding: 16px; }
+            .sidebar { position: fixed; left: -280px; top: 0; bottom: 0; width: 260px; z-index: 95; border-right: 1px solid var(--border-color); transition: left 0.3s ease; }
+            .sidebar.open { left: 0; }
+            .sidebar-overlay.open { display: block; }
+            .mobile-menu-btn { display: flex; }
+            .chat-messages { padding: 16px; padding-top: 56px; }
             .input-area { padding: 16px; }
         }
     </style>
 </head>
 <body>
+    <button class="mobile-menu-btn" id="mobile-menu-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+    </button>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
     <div class="app-layout">
         <!-- Sidebar -->
         <div class="sidebar">
@@ -207,6 +289,17 @@
             <div class="history-list" id="history-list">
                 <!-- History injects here via JS -->
             </div>
+
+            <div class="mode-toggle" id="mode-toggle">
+                <button class="mode-toggle-btn active" data-mode="normal">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                    Обычный
+                </button>
+                <button class="mode-toggle-btn" data-mode="emercom">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                    МЧС
+                </button>
+            </div>
             
             <button id="theme-toggle" class="theme-toggle">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sun-icon"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
@@ -217,9 +310,33 @@
         <!-- Main Workspace -->
         <div class="main-col">
             <div class="welcome-screen" id="welcome-screen">
-                <div class="logo">👋</div>
-                <h2>SignBridge AI</h2>
-                <p>Напишите текст на любом языке, и 3D-аватар переведет его на язык жестов.</p>
+                <canvas id="particle-canvas"></canvas>
+                <div class="welcome-content">
+                    <div class="logo">
+                        <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <g class="hand-wave">
+                                <circle cx="50" cy="38" r="8" fill="#FBBF24"/>
+                                <rect x="46" y="45" width="8" height="22" rx="4" fill="#FBBF24"/>
+                                <rect x="36" y="30" width="6" height="20" rx="3" fill="#FBBF24" transform="rotate(-15 39 40)"/>
+                                <rect x="44" y="24" width="6" height="22" rx="3" fill="#FCD34D"/>
+                                <rect x="52" y="22" width="6" height="23" rx="3" fill="#FBBF24"/>
+                                <rect x="60" y="26" width="6" height="20" rx="3" fill="#FCD34D" transform="rotate(10 63 36)"/>
+                                <rect x="67" y="33" width="5" height="14" rx="2.5" fill="#FBBF24" transform="rotate(20 69 40)"/>
+                                <rect x="38" y="58" width="24" height="10" rx="5" fill="#FBBF24"/>
+                                <path d="M38 68 Q42 80 50 82 Q58 80 62 68" fill="#FBBF24"/>
+                            </g>
+                        </svg>
+                    </div>
+                    <h2>SignBridge AI</h2>
+                    <p>Напишите текст на любом языке, и 3D-аватар переведет его на язык жестов.</p>
+                    <div class="quick-phrases" id="quick-phrases">
+                        <button class="phrase-chip" data-text="Привет">👋 Привет</button>
+                        <button class="phrase-chip" data-text="Спасибо">🙏 Спасибо</button>
+                        <button class="phrase-chip" data-text="Как дела?">😊 Как дела?</button>
+                        <button class="phrase-chip" data-text="Помогите">🆘 Помогите</button>
+                        <button class="phrase-chip" data-text="До свидания">✌️ До свидания</button>
+                    </div>
+                </div>
             </div>
 
             <div class="chat-messages" id="chat-messages">
@@ -227,7 +344,7 @@
 
             <div class="input-area">
                 <div class="input-wrapper">
-                    <textarea id="gloss-input" rows="1" placeholder="Введите фразу..."></textarea>
+                    <textarea id="gloss-input" rows="1" placeholder="Введите фразу..." maxlength="500"></textarea>
                     
                     <span id="lang-flag" class="lang-flag"></span>
 
@@ -254,7 +371,7 @@
                     
                     <div id="bg-popover" class="bg-popover">
                         <button class="color-option active" data-color="white" title="Белый"><span class="color-swatch" style="background: white;"></span></button>
-                        <button class="color-option" data-color="#00FF00" title="Зеленый хромакей"><span class="color-swatch" style="background: #00FF00;"></span></button>
+                        <button class="color-option" data-color="green" title="Зеленый хромакей"><span class="color-swatch" style="background: #00FF00;"></span></button>
                         <button class="color-option" data-color="#1F2937" title="Темный"><span class="color-swatch" style="background: #1F2937;"></span></button>
                         <button class="color-option" data-color="transparent" title="Прозрачный"><span class="color-swatch" style="background: repeating-conic-gradient(#e5e7eb 0% 25%, white 0% 50%) 50% / 8px 8px;"></span></button>
                     </div>
@@ -268,6 +385,22 @@
     </div>
 
     <script type="module" src="main.js"></script>
+    <script>
+        // Mobile sidebar toggle
+        const menuBtn = document.getElementById('mobile-menu-btn');
+        const overlay = document.getElementById('sidebar-overlay');
+        const sidebar = document.querySelector('.sidebar');
+        if (menuBtn && sidebar && overlay) {
+            menuBtn.addEventListener('click', () => {
+                sidebar.classList.toggle('open');
+                overlay.classList.toggle('open');
+            });
+            overlay.addEventListener('click', () => {
+                sidebar.classList.remove('open');
+                overlay.classList.remove('open');
+            });
+        }
+    </script>
 
 </body>
 </html>

@@ -27,6 +27,8 @@ const SESSIONS_FILE = path.join(__dirname, '../../sessions.json');
     }
 });
 
+app.use('/api/v1/video/cache', express.static(CACHE_DIR));
+
 if (!fs.existsSync(SESSIONS_FILE)) {
     fs.writeFileSync(SESSIONS_FILE, JSON.stringify([]));
 }
@@ -43,7 +45,8 @@ function getCacheKey(config) {
     const str = JSON.stringify({
         glosses: config.glosses,
         avatar: config.avatar || 'Aibek',
-        background: config.background || 'white'
+        background: config.background || 'white',
+        mode: config.mode || 'normal'
     });
     return crypto.createHash('md5').update(str).digest('hex');
 }
@@ -90,22 +93,27 @@ class Semaphore {
     async acquire(onWait) {
         if (this.active < this.max) {
             this.active++;
+            console.log(`[Semaphore] ACQUIRE: Slot taken. Active: ${this.active}, Waiting: ${this.waiting.length}`);
             return Promise.resolve();
         }
         return new Promise(resolve => {
             this.waiting.push({ resolve, onWait });
+            console.log(`[Semaphore] QUEUED: Limit reached. Task added to queue. In queue: ${this.waiting.length}`);
             this.notify();
         });
     }
     release() {
         this.active--;
+        console.log(`[Semaphore] RELEASE: Slot freed. Active: ${this.active}, Remaining in queue: ${this.waiting.length}`);
         if (this.waiting.length > 0) {
             this.active++;
             const { resolve } = this.waiting.shift();
+            console.log(`[Semaphore] NEXT: Resolving next task from queue.`);
             resolve();
             this.notify();
         }
     }
+
     notify() {
         this.waiting.forEach((item, index) => {
             if (item.onWait) item.onWait(index + 1);
@@ -113,9 +121,34 @@ class Semaphore {
     }
 }
 
-const renderSemaphore = new Semaphore(1);
+const renderSemaphore = new Semaphore(2);
 
+// --- Rate Limiter (per-IP) ---
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW = 60000;
+const RATE_LIMIT_MAX = 10;
 
+function rateLimit(req, res, next) {
+    const ip = req.ip || req.connection.remoteAddress;
+    const now = Date.now();
+    const entry = rateLimitMap.get(ip);
+    if (!entry || now - entry.start > RATE_LIMIT_WINDOW) {
+        rateLimitMap.set(ip, { start: now, count: 1 });
+        return next();
+    }
+    entry.count++;
+    if (entry.count > RATE_LIMIT_MAX) {
+        return res.status(429).json({ error: 'Too many requests. Try again later.' });
+    }
+    next();
+}
+
+setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of rateLimitMap) {
+        if (now - entry.start > RATE_LIMIT_WINDOW) rateLimitMap.delete(ip);
+    }
+}, RATE_LIMIT_WINDOW);
 
 /**
  * Core Video Generation Logic
@@ -171,9 +204,16 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
         if(onProgress) onProgress(20, 'Анализируем текст и подбираем жесты 🧠');
         console.log(`[Server] Starting recording...`);
         
-        const dataUrl = await page.evaluate(async (config) => {
-            return await window.startHeadlessRender(config);
-        }, { glosses, avatar, background });
+        let renderTimer;
+        const dataUrl = await Promise.race([
+            page.evaluate(async (config) => {
+                return await window.startHeadlessRender(config);
+            }, { glosses, avatar, background }),
+            new Promise((_, reject) => {
+                renderTimer = setTimeout(() => reject(new Error('Render timeout: exceeded 180 seconds')), 180000);
+            })
+        ]);
+        clearTimeout(renderTimer);
 
         if (!dataUrl || typeof dataUrl !== 'string') {
             throw new Error('Render failed: no data returned from browser');
@@ -201,8 +241,8 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
 /**
  * v1: Synchronous Backend Endpoint (Retro-compatibility)
  */
-app.post('/api/v1/video/generate', async (req, res) => {
-    const { glosses, avatar, background } = req.body;
+app.post('/api/v1/video/generate', rateLimit, async (req, res) => {
+    const { glosses, avatar, background, mode } = req.body;
 
     if (!glosses || (!Array.isArray(glosses) && typeof glosses !== 'string')) {
         return res.status(400).json({ error: 'glosses missing' });
@@ -211,8 +251,9 @@ app.post('/api/v1/video/generate', async (req, res) => {
     console.log(`[Server v1] Received render request`);
     const userAgent = req.headers['user-agent'] || '';
 
+    let acquired = false;
     try {
-        const cacheKey = getCacheKey({ glosses, avatar, background });
+        const cacheKey = getCacheKey({ glosses, avatar, background, mode });
         const cachePath = path.join(CACHE_DIR, `${cacheKey}.webm`);
         
         if (fs.existsSync(cachePath)) {
@@ -221,6 +262,7 @@ app.post('/api/v1/video/generate', async (req, res) => {
         }
 
         await renderSemaphore.acquire();
+        acquired = true;
         const result = await generateVideoCore(glosses, avatar, background, userAgent, null);
         const sendPath = result.sendWebM ? result.webmPath : result.mp4Path;
         const filename = result.sendWebM ? 'animation.webm' : 'animation.mp4';
@@ -231,8 +273,8 @@ app.post('/api/v1/video/generate', async (req, res) => {
 
         res.download(sendPath, filename, async (err) => {
             try {
-                if (fs.existsSync(result.webmPath)) await fs.promises.unlink(result.webmPath);
-                if (fs.existsSync(result.mp4Path)) await fs.promises.unlink(result.mp4Path);
+                if (result.webmPath && fs.existsSync(result.webmPath)) await fs.promises.unlink(result.webmPath);
+                if (result.mp4Path && fs.existsSync(result.mp4Path)) await fs.promises.unlink(result.mp4Path);
             } catch (cleanupErr) {
                 console.error('[Server v1] Cleanup error:', cleanupErr);
             }
@@ -241,7 +283,7 @@ app.post('/api/v1/video/generate', async (req, res) => {
         console.error('[Server v1] Render error:', error);
         res.status(500).json({ error: error.message });
     } finally {
-        renderSemaphore.release();
+        if (acquired) renderSemaphore.release();
     }
 });
 
@@ -250,12 +292,19 @@ app.post('/api/v1/video/generate', async (req, res) => {
 /**
  * v2: Asynchronous Task Creation
  */
-app.post('/api/v1/video/generate-async', (req, res) => {
-    const { glosses, avatar, background, sessionId, msgId } = req.body;
+app.post('/api/v1/video/generate-async', rateLimit, (req, res) => {
+    const { glosses, avatar, background, mode, sessionId, msgId } = req.body;
 
-    
-    if (!glosses) {
-        return res.status(400).json({ error: 'glosses missing' });
+    if (!glosses || (!Array.isArray(glosses) && typeof glosses !== 'string')) {
+        return res.status(400).json({ error: 'glosses missing or invalid' });
+    }
+
+    // Input validation
+    if (avatar && (typeof avatar !== 'string' || avatar.length > 50)) {
+        return res.status(400).json({ error: 'invalid avatar' });
+    }
+    if (background && (typeof background !== 'string' || background.length > 50)) {
+        return res.status(400).json({ error: 'invalid background' });
     }
 
     const taskId = crypto.randomUUID();
@@ -271,6 +320,16 @@ app.post('/api/v1/video/generate-async', (req, res) => {
         }
     }
 
+    // Prune old completed/error tasks if over limit
+    const MAX_TASKS = 500;
+    if (tasks.size >= MAX_TASKS) {
+        for (const [id, t] of tasks.entries()) {
+            if (t.status === 'error' || t.status === 'completed') {
+                cleanupTask(id);
+            }
+            if (tasks.size < MAX_TASKS) break;
+        }
+    }
 
     // Initialize task
     tasks.set(taskId, {
@@ -289,6 +348,7 @@ app.post('/api/v1/video/generate-async', (req, res) => {
     // Background processing
     (async () => {
         const task = tasks.get(taskId);
+        let acquired = false;
         
         const onProgress = (pct, msg) => {
             task.progress = pct;
@@ -300,13 +360,13 @@ app.post('/api/v1/video/generate-async', (req, res) => {
 
         try {
             // --- Caching Layer ---
-            const cacheKey = getCacheKey({ glosses, avatar, background });
+            const cacheKey = getCacheKey({ glosses, avatar, background, mode });
             const cachePath = path.join(CACHE_DIR, `${cacheKey}.webm`);
             
             if (fs.existsSync(cachePath)) {
                 console.log(`[Cache] Hit for key: ${cacheKey}`);
                 task.finalFilePath = cachePath;
-                task.downloadUrl = `/api/v1/video/download/${taskId}`;
+                task.downloadUrl = `/api/v1/video/cache/${cacheKey}.webm`;
                 task.status = 'completed';
                 task.progress = 100;
                 task.message = 'Готово (из кэша)!';
@@ -328,6 +388,7 @@ app.post('/api/v1/video/generate-async', (req, res) => {
             await renderSemaphore.acquire((pos) => {
                 onProgress(0, `Ждем очереди (вы #${pos} в списке)...`);
             });
+            acquired = true;
 
             const result = await generateVideoCore(glosses, avatar, background, userAgent, onProgress);
             
@@ -343,7 +404,7 @@ app.post('/api/v1/video/generate-async', (req, res) => {
 
             task.finalFilePath = result.sendWebM ? result.webmPath : result.mp4Path;
             task.otherFilePath = result.sendWebM ? result.mp4Path : result.webmPath;
-            task.downloadUrl = `/api/v1/video/download/${taskId}`;
+            task.downloadUrl = `/api/v1/video/cache/${cacheKey}.webm`;
             task.status = 'completed';
             
             // AUTO UPDATE SESSIONS FILE
@@ -367,12 +428,17 @@ app.post('/api/v1/video/generate-async', (req, res) => {
         } catch (err) {
             console.error(`[Server v2] Task ${taskId} failed:`, err);
             task.status = 'error';
+            task.errorMessage = err.message;
             if (task.sseResponse) {
                 task.sseResponse.write(`data: ${JSON.stringify({ error: err.message, progress: 0 })}\n\n`);
                 task.sseResponse.end();
             }
+            // Auto cleanup error tasks after 5 minutes
+            setTimeout(() => {
+                if (tasks.has(taskId)) cleanupTask(taskId);
+            }, 300000);
         } finally {
-            renderSemaphore.release();
+            if (acquired) renderSemaphore.release();
         }
     })();
 });
@@ -406,7 +472,8 @@ app.get('/api/v1/video/status/:taskId', (req, res) => {
         progress: task.progress, 
         message: task.message,
         downloadUrl: task.downloadUrl,
-        status: task.status
+        status: task.status,
+        error: task.errorMessage || null
     };
     res.write(`data: ${JSON.stringify(initialState)}\n\n`);
 
@@ -417,6 +484,13 @@ app.get('/api/v1/video/status/:taskId', (req, res) => {
         }
     }, 5000);
 
+    // If task already finished, close connection after sending initial state
+    if (task.status === 'completed' || task.status === 'error') {
+        clearInterval(pingInterval);
+        res.end();
+        return;
+    }
+
     // Handle client disconnect
     req.on('close', () => {
         clearInterval(pingInterval);
@@ -424,16 +498,16 @@ app.get('/api/v1/video/status/:taskId', (req, res) => {
     });
 });
 
-function cleanupTask(taskId) {
+async function cleanupTask(taskId) {
     const task = tasks.get(taskId);
     if (!task) return;
     try {
         // IMPORTANT: Never delete files from CACHE_DIR
         if (task.finalFilePath && task.finalFilePath.includes(TEMP_DIR) && fs.existsSync(task.finalFilePath)) {
-            fs.promises.unlink(task.finalFilePath);
+            await fs.promises.unlink(task.finalFilePath);
         }
         if (task.otherFilePath && task.otherFilePath.includes(TEMP_DIR) && fs.existsSync(task.otherFilePath)) {
-            fs.promises.unlink(task.otherFilePath);
+            await fs.promises.unlink(task.otherFilePath);
         }
     } catch(e) { console.error('Cleanup error:', e); }
     tasks.delete(taskId);
@@ -465,26 +539,37 @@ async function getSessionsFromDisk() {
     } catch (e) { return []; }
 }
 
-let isWritingSessions = false;
-async function safeWriteSessions(sessions) {
-    while (isWritingSessions) {
-        await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    isWritingSessions = true;
-    try {
-        await fs.promises.writeFile(SESSIONS_FILE, JSON.stringify(sessions, null, 2));
-    } finally {
-        isWritingSessions = false;
-    }
+let _writeQueue = Promise.resolve();
+async function safeWriteSessions(incomingSessions) {
+    _writeQueue = _writeQueue.then(async () => {
+        // Merge: preserve videoUrl set by background tasks that client may not know about
+        try {
+            const diskData = await fs.promises.readFile(SESSIONS_FILE, 'utf8');
+            const diskSessions = JSON.parse(diskData);
+            for (const diskSession of diskSessions) {
+                const incoming = incomingSessions.find(s => s.id === diskSession.id);
+                if (incoming) {
+                    for (const diskMsg of (diskSession.messages || [])) {
+                        if (diskMsg.videoUrl && diskMsg.msgId) {
+                            const incomingMsg = incoming.messages.find(m => m.msgId === diskMsg.msgId);
+                            if (incomingMsg && !incomingMsg.videoUrl) {
+                                incomingMsg.videoUrl = diskMsg.videoUrl;
+                                incomingMsg.timestamp = diskMsg.timestamp;
+                                incomingMsg.taskId = null;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch(e) { /* ignore merge errors */ }
+        await fs.promises.writeFile(SESSIONS_FILE, JSON.stringify(incomingSessions, null, 2));
+    }).catch(e => console.error('[Storage] Write error:', e));
+    return _writeQueue;
 }
 
 // Atomic update for tasks
 async function updateSessionTaskResult(sessionId, msgId, videoUrl) {
-    while (isWritingSessions) {
-        await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    isWritingSessions = true; // Lock before reading
-    try {
+    _writeQueue = _writeQueue.then(async () => {
         const data = await fs.promises.readFile(SESSIONS_FILE, 'utf8');
         const sessions = data ? JSON.parse(data) : [];
         
@@ -499,11 +584,8 @@ async function updateSessionTaskResult(sessionId, msgId, videoUrl) {
                 console.log(`[Storage] Auto-updated message ${msgId} with video result.`);
             }
         }
-    } catch (e) {
-        console.error('[Storage] Auto-update failed:', e);
-    } finally {
-        isWritingSessions = false;
-    }
+    }).catch(e => console.error('[Storage] Auto-update error:', e));
+    return _writeQueue;
 }
 
 
@@ -526,6 +608,35 @@ app.post('/api/v1/sessions', async (req, res) => {
     }
 });
 
+
+// Periodic cleanup: keep TEMP_DIR under 500MB (LRU)
+const MAX_TEMP_SIZE = 500 * 1024 * 1024; // 500 MB
+setInterval(async () => {
+    try {
+        const files = await fs.promises.readdir(TEMP_DIR);
+        if (files.length === 0) return;
+        const fileStats = await Promise.all(
+            files.map(async (file) => {
+                const filePath = path.join(TEMP_DIR, file);
+                try {
+                    const stats = await fs.promises.stat(filePath);
+                    return { path: filePath, name: file, size: stats.size, mtime: stats.mtime };
+                } catch(e) { return null; }
+            })
+        );
+        const valid = fileStats.filter(Boolean);
+        valid.sort((a, b) => a.mtime - b.mtime); // oldest first
+        let totalSize = valid.reduce((sum, f) => sum + f.size, 0);
+        for (const file of valid) {
+            if (totalSize <= MAX_TEMP_SIZE) break;
+            try {
+                await fs.promises.unlink(file.path);
+                totalSize -= file.size;
+                console.log(`[Cleanup] Deleted ${file.name} (LRU). Remaining: ${Math.round(totalSize/1024/1024)}MB`);
+            } catch(e) {}
+        }
+    } catch(e) { console.error('[Cleanup] Error:', e); }
+}, 600000); // Every 10 minutes
 
 app.listen(port, '0.0.0.0', () => {
     console.log(`[Server] Video Renderer API listening at http://0.0.0.0:${port}`);
