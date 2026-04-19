@@ -55,6 +55,7 @@ Options:
             '--no-sandbox', 
             '--disable-setuid-sandbox', 
             hasGPU ? '--use-gl=egl' : '--use-gl=swiftshader',
+            ...(hasGPU ? ['--enable-gpu', '--disable-gpu-sandbox', '--disable-software-rasterizer'] : []),
             '--enable-gpu-rasterization',
             '--enable-zero-copy',
             '--ignore-gpu-blocklist',

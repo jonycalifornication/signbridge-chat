@@ -174,6 +174,8 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                 '--enable-webgl',
                 // Use EGL when NVIDIA GPU is available, otherwise SwiftShader
                 hasGPU ? '--use-gl=egl' : '--use-gl=swiftshader',
+                // Required for headless GPU rendering
+                ...(hasGPU ? ['--enable-gpu', '--disable-gpu-sandbox', '--disable-software-rasterizer'] : []),
                 '--enable-gpu-rasterization',
                 '--enable-zero-copy',
                 '--ignore-gpu-blocklist',
