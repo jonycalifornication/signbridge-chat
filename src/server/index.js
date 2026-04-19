@@ -592,7 +592,17 @@ async function atomicWriteFile(filePath, data) {
     await fs.promises.writeFile(tmpPath, data);
     // Create backup of current file
     try { await fs.promises.copyFile(filePath, backupPath); } catch(e) { /* first write, no backup needed */ }
-    await fs.promises.rename(tmpPath, filePath);
+    // Use copyFile + unlink instead of rename — rename fails on Docker bind mounts (EBUSY)
+    try {
+        await fs.promises.rename(tmpPath, filePath);
+    } catch(renameErr) {
+        if (renameErr.code === 'EBUSY' || renameErr.code === 'EXDEV') {
+            await fs.promises.copyFile(tmpPath, filePath);
+            await fs.promises.unlink(tmpPath).catch(() => {});
+        } else {
+            throw renameErr;
+        }
+    }
 }
 
 let _writeQueue = Promise.resolve();
