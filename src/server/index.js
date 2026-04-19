@@ -172,10 +172,10 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                 '--disable-features=IsolateOrigins,site-per-process',
                 '--allow-running-insecure-content',
                 '--enable-webgl',
-                // Use EGL when NVIDIA GPU is available, otherwise SwiftShader
-                hasGPU ? '--use-gl=egl' : '--use-gl=swiftshader',
+                // Use ANGLE+EGL when NVIDIA GPU is available, otherwise SwiftShader
+                ...(hasGPU ? ['--use-gl=angle', '--use-angle=gl-egl'] : ['--use-gl=swiftshader']),
                 // Required for headless GPU rendering
-                ...(hasGPU ? ['--enable-gpu', '--disable-gpu-sandbox', '--disable-software-rasterizer'] : []),
+                ...(hasGPU ? ['--enable-gpu', '--disable-gpu-sandbox', '--disable-software-rasterizer', '--ozone-platform=headless'] : []),
                 '--enable-gpu-rasterization',
                 '--enable-zero-copy',
                 '--ignore-gpu-blocklist',

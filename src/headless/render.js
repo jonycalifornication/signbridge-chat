@@ -54,8 +54,8 @@ Options:
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox', 
-            hasGPU ? '--use-gl=egl' : '--use-gl=swiftshader',
-            ...(hasGPU ? ['--enable-gpu', '--disable-gpu-sandbox', '--disable-software-rasterizer'] : []),
+            ...(hasGPU ? ['--use-gl=angle', '--use-angle=gl-egl'] : ['--use-gl=swiftshader']),
+            ...(hasGPU ? ['--enable-gpu', '--disable-gpu-sandbox', '--disable-software-rasterizer', '--ozone-platform=headless'] : []),
             '--enable-gpu-rasterization',
             '--enable-zero-copy',
             '--ignore-gpu-blocklist',
