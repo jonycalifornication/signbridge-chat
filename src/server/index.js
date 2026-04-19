@@ -160,6 +160,9 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
         
         const appUrl = process.env.APP_URL || 'http://localhost:5173';
         
+        const hasGPU = !!process.env.NVIDIA_VISIBLE_DEVICES;
+        console.log(`[Server] GPU mode: ${hasGPU ? 'NVIDIA (EGL)' : 'SwiftShader (CPU)'}`);
+
         browser = await puppeteer.launch({
             headless: "new",
             args: [
@@ -169,8 +172,8 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                 '--disable-features=IsolateOrigins,site-per-process',
                 '--allow-running-insecure-content',
                 '--enable-webgl',
-                // GPU-accelerated rendering via EGL (uses NVIDIA GPU if available, falls back to SwiftShader)
-                '--use-gl=egl',
+                // Use EGL when NVIDIA GPU is available, otherwise SwiftShader
+                hasGPU ? '--use-gl=egl' : '--use-gl=swiftshader',
                 '--enable-gpu-rasterization',
                 '--enable-zero-copy',
                 '--ignore-gpu-blocklist',

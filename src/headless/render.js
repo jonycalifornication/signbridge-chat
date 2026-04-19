@@ -46,12 +46,15 @@ Options:
     console.log(`[Headless] Avatar: ${avatar}`);
     console.log(`[Headless] Output: ${output}`);
 
+    const hasGPU = !!process.env.NVIDIA_VISIBLE_DEVICES;
+    console.log(`[Headless] GPU mode: ${hasGPU ? 'NVIDIA (EGL)' : 'SwiftShader (CPU)'}`);
+
     const browser = await puppeteer.launch({
         headless: "new",
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox', 
-            '--use-gl=egl',
+            hasGPU ? '--use-gl=egl' : '--use-gl=swiftshader',
             '--enable-gpu-rasterization',
             '--enable-zero-copy',
             '--ignore-gpu-blocklist',
