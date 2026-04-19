@@ -576,7 +576,11 @@ window.addEventListener('beforeunload', () => {
 
 
 function _uid(prefix) {
-    return prefix + crypto.randomUUID();
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return prefix + crypto.randomUUID();
+    return prefix + 'xxxx-xxxx-4xxx-yxxx-xxxx'.replace(/[xy]/g, c => {
+        const r = crypto.getRandomValues(new Uint8Array(1))[0] & 15;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    }) + '-' + Date.now().toString(36);
 }
 
 function startNewSession() {
