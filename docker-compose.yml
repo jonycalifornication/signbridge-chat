@@ -27,9 +27,6 @@ services:
     environment:
       # URL where renderer can reach the static files
       - APP_URL=http://avatar-widget:80
-      # GPU-accelerated encoding (auto-detected at runtime)
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
     volumes:
       - ./sessions.json:/app/sessions.json
       - ./video_cache:/app/video_cache

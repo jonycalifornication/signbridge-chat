@@ -160,7 +160,7 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
         
         const appUrl = process.env.APP_URL || 'http://localhost:5173';
         
-        const hasGPU = !!process.env.NVIDIA_VISIBLE_DEVICES;
+        const hasGPU = fs.existsSync('/dev/nvidia0');
         console.log(`[Server] GPU mode: ${hasGPU ? 'NVIDIA (EGL)' : 'SwiftShader (CPU)'}`);
 
         browser = await puppeteer.launch({

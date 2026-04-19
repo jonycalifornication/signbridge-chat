@@ -46,7 +46,7 @@ Options:
     console.log(`[Headless] Avatar: ${avatar}`);
     console.log(`[Headless] Output: ${output}`);
 
-    const hasGPU = !!process.env.NVIDIA_VISIBLE_DEVICES;
+    const hasGPU = fs.existsSync('/dev/nvidia0');
     console.log(`[Headless] GPU mode: ${hasGPU ? 'NVIDIA (EGL)' : 'SwiftShader (CPU)'}`);
 
     const browser = await puppeteer.launch({
