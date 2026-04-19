@@ -10,7 +10,7 @@ services:
       - "5173:80"
     environment:
       # Backend URL for API proxy (signBridgeStorage)
-      - BACKEND_URL=${BACKEND_URL:-http://host.docker.internal:8000}
+      - BACKEND_URL=${BACKEND_URL:-http://94.131.83.85:8000}
       # Internal URL for video renderer
       - RENDERER_URL=http://avatar-renderer:3000
 
