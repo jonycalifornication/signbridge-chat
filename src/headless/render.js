@@ -51,8 +51,10 @@ Options:
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox', 
-            '--use-gl=angle', 
-            '--use-angle=gl',
+            '--use-gl=egl',
+            '--enable-gpu-rasterization',
+            '--enable-zero-copy',
+            '--ignore-gpu-blocklist',
             '--disable-web-security'
         ]
     });
@@ -108,8 +110,16 @@ Options:
 
         if (isMp4) {
             try {
-                console.log(`[Headless] Converting to MP4 using ffmpeg...`);
-                execSync(`ffmpeg -i "${tempWebm}" -c:v libx264 -crf 23 -pix_fmt yuv420p "${output}" -y`, { stdio: 'ignore' });
+                console.log(`[Headless] Converting to MP4...`);
+                // Try GPU-accelerated encoding first, fall back to CPU
+                try {
+                    execSync(`ffmpeg -i "${tempWebm}" -c:v h264_nvenc -preset p4 -cq 23 -pix_fmt yuv420p "${output}" -y`, { stdio: 'ignore' });
+                    console.log(`[Headless] GPU-accelerated conversion complete (h264_nvenc).`);
+                } catch {
+                    console.log(`[Headless] GPU encoder unavailable, falling back to CPU (libx264).`);
+                    execSync(`ffmpeg -i "${tempWebm}" -c:v libx264 -crf 23 -pix_fmt yuv420p "${output}" -y`, { stdio: 'ignore' });
+                    console.log(`[Headless] CPU conversion complete.`);
+                }
                 fs.unlinkSync(tempWebm);
                 console.log(`[Headless] Conversion complete.`);
             } catch (e) {

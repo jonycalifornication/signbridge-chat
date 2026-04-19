@@ -1,6 +1,6 @@
 FROM node:20-slim
 
-# Install dependencies for Puppeteer, Chromium and FFmpeg
+# Install dependencies for Puppeteer, Chromium, FFmpeg and GPU support
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -22,6 +22,12 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     libx11-xcb1 \
     chromium \
+    # EGL/Vulkan libraries for GPU-accelerated WebGL
+    libegl1 \
+    libgles2 \
+    libvulkan1 \
+    # FFmpeg with NVENC support
+    ffmpeg \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 

@@ -169,6 +169,11 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                 '--disable-features=IsolateOrigins,site-per-process',
                 '--allow-running-insecure-content',
                 '--enable-webgl',
+                // GPU-accelerated rendering via EGL (uses NVIDIA GPU if available, falls back to SwiftShader)
+                '--use-gl=egl',
+                '--enable-gpu-rasterization',
+                '--enable-zero-copy',
+                '--ignore-gpu-blocklist',
                 `--unsafely-treat-insecure-origin-as-secure=${appUrl}`
             ],
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null
