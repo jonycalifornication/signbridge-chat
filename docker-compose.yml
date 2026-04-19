@@ -4,7 +4,7 @@ services:
       context: .
       args:
         VITE_API_URL: ${VITE_API_URL:-/api/v1}
-        VITE_API_KEY: ${VITE_API_KEY:-}
+        VITE_API_KEY: ${VITE_API_KEY:-sbk_XUQqK17Ui7Gqqe9myqm0S0HGfL52rUWv01KiQMg56S0}
         VITE_LANGUAGE_ID: ${VITE_LANGUAGE_ID:-kz_KSL}
     ports:
       - "5173:80"
