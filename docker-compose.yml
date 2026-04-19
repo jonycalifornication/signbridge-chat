@@ -32,11 +32,4 @@ services:
       - ./video_cache:/app/video_cache
       - ./temp_videos:/app/temp_videos
     restart: always
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu, graphics, video, compute, utility]
 

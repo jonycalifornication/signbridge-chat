@@ -1,0 +1,9 @@
+services:
+  avatar-renderer:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, graphics, video, compute, utility]
