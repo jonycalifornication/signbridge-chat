@@ -47,14 +47,17 @@ Options:
     console.log(`[Headless] Output: ${output}`);
 
     const hasGPU = fs.existsSync('/dev/nvidia0');
-    console.log(`[Headless] GPU mode: ${hasGPU ? 'NVIDIA (EGL)' : 'SwiftShader (CPU)'}`);
+    console.log(`[Headless] GPU mode: ${hasGPU ? 'NVIDIA (EGL)' : 'ANGLE SwiftShader (CPU)'}`);
 
     const browser = await puppeteer.launch({
         headless: "new",
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox', 
-            ...(hasGPU ? ['--use-gl=angle', '--use-angle=gl-egl'] : ['--use-gl=swiftshader']),
+            '--enable-webgl',
+            ...(hasGPU
+                ? ['--use-gl=angle', '--use-angle=gl-egl']
+                : ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']),
             ...(hasGPU ? ['--enable-gpu', '--disable-gpu-sandbox', '--disable-software-rasterizer', '--ozone-platform=headless'] : []),
             '--enable-gpu-rasterization',
             '--enable-zero-copy',

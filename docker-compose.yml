@@ -27,9 +27,12 @@ services:
     environment:
       # URL where renderer can reach the static files
       - APP_URL=http://avatar-widget:80
+      # Backend API for server-side render planning
+      - RENDER_PLAN_API_URL=${BACKEND_URL:-http://94.131.83.85:8000}/api/v1
+      - RENDER_PLAN_API_KEY=${VITE_API_KEY:-sbk_XUQqK17Ui7Gqqe9myqm0S0HGfL52rUWv01KiQMg56S0}
+      - RENDER_PLAN_LANGUAGE_ID=${VITE_LANGUAGE_ID:-kz_KSL}
     volumes:
       - ./sessions.json:/app/sessions.json
       - ./video_cache:/app/video_cache
       - ./temp_videos:/app/temp_videos
     restart: always
-

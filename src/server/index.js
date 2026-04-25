@@ -7,6 +7,12 @@ import fs from 'fs';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import {
+    buildRenderPlan,
+    estimateFallbackTimeoutMs,
+    estimateRenderTimeoutMs,
+    renderPlanToGlossPreview
+} from '../headless/render-plan.js';
 
 const execPromise = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -49,6 +55,42 @@ function getCacheKey(config) {
         mode: config.mode || 'normal'
     });
     return crypto.createHash('md5').update(str).digest('hex');
+}
+
+function resolveRenderPlanApiConfig(appUrl) {
+    const rawApiUrl = process.env.RENDER_PLAN_API_URL || process.env.API_URL || process.env.VITE_API_URL || `${appUrl}/api/v1`;
+    const apiUrl = rawApiUrl.startsWith('/')
+        ? `${appUrl.replace(/\/+$/, '')}${rawApiUrl}`
+        : rawApiUrl;
+
+    return {
+        apiUrl,
+        apiKey: process.env.RENDER_PLAN_API_KEY || process.env.API_KEY || process.env.VITE_API_KEY || '',
+        languageId: process.env.RENDER_PLAN_LANGUAGE_ID || process.env.VITE_LANGUAGE_ID || 'kz_KSL',
+        fetchTimeoutMs: Number(process.env.RENDER_PLAN_FETCH_TIMEOUT_MS) || 10000,
+    };
+}
+
+function hasRendererGPU() {
+    return fs.existsSync('/dev/nvidia0');
+}
+
+async function prepareRenderPlan(glosses, appUrl, hasGPU, onProgress = null) {
+    const renderText = Array.isArray(glosses) ? glosses.join(' ') : String(glosses || '');
+    let renderPlan = null;
+    let renderTimeoutMs = estimateFallbackTimeoutMs(renderText, { hasGPU });
+
+    try {
+        if (onProgress) onProgress(8, 'Строим план жестов...');
+        renderPlan = await buildRenderPlan(renderText, resolveRenderPlanApiConfig(appUrl));
+        renderTimeoutMs = estimateRenderTimeoutMs(renderPlan, { hasGPU });
+        console.log(`[Server] Render plan ready: ${JSON.stringify(renderPlan.stats)}, timeout=${Math.round(renderTimeoutMs / 1000)}s`);
+    } catch (planErr) {
+        console.warn(`[Server] Render plan unavailable, falling back to browser planning: ${planErr.message}`);
+        console.log(`[Server] Fallback render timeout: ${Math.round(renderTimeoutMs / 1000)}s`);
+    }
+
+    return { renderPlan, renderTimeoutMs };
 }
 
 /**
@@ -153,18 +195,28 @@ setInterval(() => {
 /**
  * Core Video Generation Logic
  */
-async function generateVideoCore(glosses, avatar, background, userAgent, onProgress = null) {
+async function generateVideoCore(glosses, avatar, background, userAgent, onProgress = null, planning = {}) {
     let browser;
     try {
         if(onProgress) onProgress(5, 'Прогреваем видеопроцессоры...');
         
         const appUrl = process.env.APP_URL || 'http://localhost:5173';
         
-        const hasGPU = fs.existsSync('/dev/nvidia0');
-        console.log(`[Server] GPU mode: ${hasGPU ? 'NVIDIA (EGL)' : 'SwiftShader (CPU)'}`);
+        const hasGPU = hasRendererGPU();
+        console.log(`[Server] GPU mode: ${hasGPU ? 'NVIDIA (EGL)' : 'ANGLE SwiftShader (CPU)'}`);
+        const preparedPlan = planning.renderPlan || typeof planning.renderTimeoutMs === 'number'
+            ? {
+                renderPlan: planning.renderPlan || null,
+                renderTimeoutMs: typeof planning.renderTimeoutMs === 'number'
+                    ? planning.renderTimeoutMs
+                    : estimateRenderTimeoutMs(planning.renderPlan, { hasGPU })
+            }
+            : await prepareRenderPlan(glosses, appUrl, hasGPU, onProgress);
+        const { renderPlan, renderTimeoutMs } = preparedPlan;
 
         browser = await puppeteer.launch({
             headless: "new",
+            protocolTimeout: renderTimeoutMs + 60000,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -172,8 +224,10 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                 '--disable-features=IsolateOrigins,site-per-process',
                 '--allow-running-insecure-content',
                 '--enable-webgl',
-                // Use ANGLE+EGL when NVIDIA GPU is available, otherwise SwiftShader
-                ...(hasGPU ? ['--use-gl=angle', '--use-angle=gl-egl'] : ['--use-gl=swiftshader']),
+                // Use ANGLE+EGL when NVIDIA GPU is available, otherwise ANGLE+SwiftShader.
+                ...(hasGPU
+                    ? ['--use-gl=angle', '--use-angle=gl-egl']
+                    : ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']),
                 // Required for headless GPU rendering
                 ...(hasGPU ? ['--enable-gpu', '--disable-gpu-sandbox', '--disable-software-rasterizer', '--ozone-platform=headless'] : []),
                 '--enable-gpu-rasterization',
@@ -215,15 +269,22 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
         console.log(`[Server] Starting recording...`);
         
         let renderTimer;
-        const dataUrl = await Promise.race([
-            page.evaluate(async (config) => {
-                return await window.startHeadlessRender(config);
-            }, { glosses, avatar, background }),
-            new Promise((_, reject) => {
-                renderTimer = setTimeout(() => reject(new Error('Render timeout: exceeded 180 seconds')), 180000);
-            })
-        ]);
-        clearTimeout(renderTimer);
+        let dataUrl;
+        try {
+            dataUrl = await Promise.race([
+                page.evaluate(async (config) => {
+                    return await window.startHeadlessRender(config);
+                }, { glosses, avatar, background, renderPlan, renderProfile: { hasGPU } }),
+                new Promise((_, reject) => {
+                    renderTimer = setTimeout(
+                        () => reject(new Error(`Render timeout: exceeded ${Math.round(renderTimeoutMs / 1000)} seconds`)),
+                        renderTimeoutMs
+                    );
+                })
+            ]);
+        } finally {
+            clearTimeout(renderTimer);
+        }
 
         if (!dataUrl || typeof dataUrl !== 'string') {
             throw new Error('Render failed: no data returned from browser');
@@ -302,7 +363,7 @@ app.post('/api/v1/video/generate', rateLimit, async (req, res) => {
 /**
  * v2: Asynchronous Task Creation
  */
-app.post('/api/v1/video/generate-async', rateLimit, (req, res) => {
+app.post('/api/v1/video/generate-async', rateLimit, async (req, res) => {
     const { glosses, avatar, background, mode, sessionId, msgId } = req.body;
 
     if (!glosses || (!Array.isArray(glosses) && typeof glosses !== 'string')) {
@@ -325,7 +386,7 @@ app.post('/api/v1/video/generate-async', rateLimit, (req, res) => {
         for (const [id, t] of tasks.entries()) {
             if (t.msgId === msgId && t.status !== 'error') {
                 console.log(`[Server] Found existing task ${id} for message ${msgId}. Re-attaching.`);
-                return res.json({ taskId: id, status: 're-attached' });
+                return res.json({ taskId: id, status: 're-attached', ...(t.renderPreview || {}) });
             }
         }
     }
@@ -345,6 +406,11 @@ app.post('/api/v1/video/generate-async', rateLimit, (req, res) => {
         }
     }
 
+    const appUrl = process.env.APP_URL || 'http://localhost:5173';
+    const hasGPU = hasRendererGPU();
+    const { renderPlan, renderTimeoutMs } = await prepareRenderPlan(glosses, appUrl, hasGPU);
+    const renderPreview = renderPlan ? renderPlanToGlossPreview(renderPlan) : null;
+
     // Initialize task
     tasks.set(taskId, {
         status: 'processing',
@@ -353,11 +419,14 @@ app.post('/api/v1/video/generate-async', rateLimit, (req, res) => {
         downloadUrl: null,
         sseResponse: null,
         msgId,
-        sessionId
+        sessionId,
+        renderPlan,
+        renderTimeoutMs,
+        renderPreview
     });
 
 
-    res.json({ taskId, status: 'queued' });
+    res.json({ taskId, status: 'queued', ...(renderPreview || {}) });
 
     // Background processing
     (async () => {
@@ -404,7 +473,10 @@ app.post('/api/v1/video/generate-async', rateLimit, (req, res) => {
             });
             acquired = true;
 
-            const result = await generateVideoCore(glosses, avatar, background, userAgent, onProgress);
+            const result = await generateVideoCore(glosses, avatar, background, userAgent, onProgress, {
+                renderPlan: task.renderPlan,
+                renderTimeoutMs: task.renderTimeoutMs
+            });
             
             // Save to Cache for next time
             try {
@@ -566,9 +638,12 @@ async function getSessionsFromDisk() {
 const MAX_SESSIONS = 1000;
 const MAX_MESSAGES_PER_SESSION = 500;
 const MAX_TITLE_LENGTH = 100;
+const MAX_GLOSS_PREVIEW_LENGTH = 2000;
+const MAX_GLOSS_TOKENS = 200;
 
 function validateAndCapSessions(sessions) {
     if (!Array.isArray(sessions)) return [];
+    const allowedGlossTokenKinds = new Set(['matched', 'dactyl', 'partial-dactyl', 'missing']);
     return sessions.slice(0, MAX_SESSIONS).map(s => {
         if (!s || typeof s !== 'object' || typeof s.id !== 'string') return null;
         return {
@@ -582,6 +657,18 @@ function validateAndCapSessions(sessions) {
                         content: typeof m.content === 'string' ? m.content.slice(0, 2000) : undefined,
                         msgId: typeof m.msgId === 'string' ? m.msgId.slice(0, 60) : undefined,
                         glosses: typeof m.glosses === 'string' ? m.glosses.slice(0, 2000) : undefined,
+                        glossPreview: typeof m.glossPreview === 'string' ? m.glossPreview.slice(0, MAX_GLOSS_PREVIEW_LENGTH) : undefined,
+                        glossTokens: Array.isArray(m.glossTokens)
+                            ? m.glossTokens.slice(0, MAX_GLOSS_TOKENS).map(t => {
+                                if (!t || typeof t !== 'object') return null;
+                                return {
+                                    original: typeof t.original === 'string' ? t.original.slice(0, 100) : '',
+                                    gloss: typeof t.gloss === 'string' ? t.gloss.slice(0, 100) : '',
+                                    kind: typeof t.kind === 'string' && allowedGlossTokenKinds.has(t.kind) ? t.kind : undefined,
+                                    matched: typeof t.matched === 'boolean' ? t.matched : false,
+                                };
+                            }).filter(Boolean)
+                            : undefined,
                         videoUrl: typeof m.videoUrl === 'string' ? m.videoUrl.slice(0, 500) : undefined,
                         taskId: typeof m.taskId === 'string' ? m.taskId.slice(0, 60) : m.taskId === null ? null : undefined,
                         bgColor: typeof m.bgColor === 'string' ? m.bgColor.slice(0, 30) : undefined,
@@ -722,4 +809,3 @@ setInterval(async () => {
 app.listen(port, '0.0.0.0', () => {
     console.log(`[Server] Video Renderer API listening at http://0.0.0.0:${port}`);
 });
-

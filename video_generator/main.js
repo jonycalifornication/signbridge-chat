@@ -797,8 +797,11 @@ function appendAssistantMessageToDOM(msgData) {
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     
-    // Show gloss preview for emercom mode messages
-    if (msgData.mode === 'emercom' && msgData.glosses) {
+    if (Array.isArray(msgData.glossTokens) && msgData.glossTokens.length > 0) {
+        renderGlossPreview(bubble, msgData.glossTokens);
+    } else if (msgData.glossPreview) {
+        renderGlossPreviewSimple(bubble, msgData.glossPreview);
+    } else if (msgData.mode === 'emercom' && msgData.glosses) {
         renderGlossPreviewSimple(bubble, msgData.glosses);
     }
 
@@ -874,17 +877,28 @@ function renderVideoToBubble(bubble, url, preserveGlossPreview, durationSec) {
 }
 
 function renderGlossPreview(bubble, tokens) {
+    bubble.querySelector('.gloss-preview')?.remove();
     const div = document.createElement('div');
     div.className = 'gloss-preview';
     div.innerHTML = '<span class="gloss-label">' + t('glossLabel') + '</span> ' +
         tokens.map(tk => {
-            const cls = tk.matched ? 'matched' : 'unmatched';
-            return `<span class="gloss-token ${cls}" title="${escapeHtml(tk.original)}">${escapeHtml(tk.gloss)}</span>`;
+            const baseCls = tk.matched ? 'matched' : 'unmatched';
+            const kindCls = ['matched', 'dactyl', 'partial-dactyl', 'missing'].includes(tk.kind) ? tk.kind : '';
+            const cls = [baseCls, kindCls].filter(Boolean).join(' ');
+            const original = tk.original || '';
+            const gloss = tk.gloss || original;
+            const title = tk.kind === 'dactyl'
+                ? `${original} - дактиль`
+                : tk.kind === 'partial-dactyl'
+                    ? `${original} - частичный дактиль`
+                    : original;
+            return `<span class="gloss-token ${cls}" title="${escapeHtml(title)}">${escapeHtml(gloss)}</span>`;
         }).join(' ');
     bubble.prepend(div);
 }
 
 function renderGlossPreviewSimple(bubble, glossText) {
+    bubble.querySelector('.gloss-preview')?.remove();
     const div = document.createElement('div');
     div.className = 'gloss-preview';
     div.innerHTML = '<span class="gloss-label">' + t('glossLabel') + '</span> ' + escapeHtml(glossText);
@@ -992,9 +1006,30 @@ function regenerateVideo(msgId, glosses) {
     triggerFetch(glosses, msgId, bubble, bg, av, md);
 }
 
+function applyServerGlossPreview(data, msgId, bubble, mode) {
+    if (mode !== 'normal') return null;
+    if (!Array.isArray(data?.glossTokens) || data.glossTokens.length === 0) return null;
+
+    const preview = {
+        glossPreview: data.glossPreview || data.glossTokens.map(token => token.gloss).join(' '),
+        glossTokens: data.glossTokens
+    };
+
+    const liveRow = document.getElementById(msgId);
+    const liveBubble = liveRow?.querySelector('.bubble') || bubble;
+    if (liveRow && liveBubble) {
+        renderGlossPreview(liveBubble, data.glossTokens);
+    }
+
+    return preview;
+}
+
 async function triggerGenerate() {
     const text = glossInput.value.trim();
     if (!text) return;
+    const modeAtSend = currentMode;
+    const bgAtSend = selectedBgColor;
+    const avatarAtSend = selectedAvatar;
     glossInput.value = '';
     langFlag.innerText = '';
     sendBtn.disabled = true;
@@ -1012,20 +1047,33 @@ async function triggerGenerate() {
     // Emercom mode: convert text → glosses
     let glossText = text;
     let glossTokens = null;
-    if (currentMode === 'emercom') {
+    let glossPreview = null;
+    if (modeAtSend === 'emercom') {
         try {
             const lang = detectDictLang(text);
             await loadDictionary(lang);
             const result = textToGlosses(text);
             glossText = result.glosses;
             glossTokens = result.tokens;
+            glossPreview = result.glosses;
         } catch (e) {
             console.error('[Emercom] Gloss conversion failed:', e);
         }
     }
 
     const msgId = _uid('msg_');
-    const assistantMsgData = { role: 'assistant', msgId: msgId, glosses: glossText, timestamp: Date.now(), taskId: null, bgColor: selectedBgColor, avatar: selectedAvatar, mode: currentMode };
+    const assistantMsgData = {
+        role: 'assistant',
+        msgId: msgId,
+        glosses: glossText,
+        glossPreview,
+        glossTokens,
+        timestamp: Date.now(),
+        taskId: null,
+        bgColor: bgAtSend,
+        avatar: avatarAtSend,
+        mode: modeAtSend
+    };
     session.messages.push(assistantMsgData);
     saveSessions();
     welcomeScreen.style.opacity = '0';
@@ -1044,7 +1092,7 @@ async function triggerGenerate() {
     }
 
     scrollToBottom();
-    triggerFetch(glossText, msgId, bubble);
+    triggerFetch(glossText, msgId, bubble, bgAtSend, avatarAtSend, modeAtSend);
 }
 
 async function triggerFetch(text, msgId, bubbleNode, overrideBg, overrideAvatar, overrideMode) {
@@ -1068,9 +1116,10 @@ async function triggerFetch(text, msgId, bubbleNode, overrideBg, overrideAvatar,
         });
         if (!response.ok) throw new Error('Server error');
         const data = await response.json();
+        const preview = applyServerGlossPreview(data, msgId, bubbleNode, mode);
         
         // Save Task ID locally and on server (asyncly)
-        updateSessionParam(msgId, { taskId: data.taskId });
+        updateSessionParam(msgId, { taskId: data.taskId, ...(preview || {}) });
         
         attachTaskListener(data.taskId, msgId, bubbleNode);
     } catch (err) {
@@ -1210,5 +1259,3 @@ function updateSessionParam(msgId, data, shouldSyncToServer = true) {
 
 // Start app
 init().then(() => console.log('✅ SignBridge Ready')).catch(e => console.error('❌ SignBridge Init Error:', e));
-
-

@@ -1,5 +1,8 @@
 import { AvatarWidget } from '../widget/index.js';
 import { CONFIG } from '../config.js';
+import { loadAnimation } from '../utils/animation-loader.js';
+import { ANIMATION_DEFAULTS } from '../utils/constants.js';
+import { collectRenderPlanFileUrls } from './render-plan.js';
 
 class HeadlessRenderer extends AvatarWidget {
     constructor(containerId) {
@@ -21,8 +24,111 @@ class HeadlessRenderer extends AvatarWidget {
         console.log('[Headless] Skipping widget toggle setup');
     }
 
+    async preloadRenderPlan(renderPlan) {
+        const fileUrls = collectRenderPlanFileUrls(renderPlan);
+        if (fileUrls.length === 0) return new Map();
+
+        console.log(`[Headless] Preloading render plan animations: ${fileUrls.length}`);
+        return await this.downloadManager.preloadSequence(
+            fileUrls.map(fileUrl => ({ found: true, file_url: fileUrl }))
+        );
+    }
+
+    async parsePreloadedAnimations(urls) {
+        if (!urls || urls.size === 0 || !this.currentVrm) return;
+        if (window.reportProgress) window.reportProgress(30, 'Загружаем 3D-данные из подсознания (S3)...');
+        const parsePromises = [...urls.values()].map(blobUrl =>
+            loadAnimation(blobUrl, this.currentVrm, this.animationCache).catch(() => null)
+        );
+        await Promise.all(parsePromises);
+        console.log('[Headless] All animations fully downloaded and parsed into memory!');
+    }
+
+    async playRemoteAnimation(fileUrl, preloadedUrls, spokenText, speed) {
+        try {
+            let animationUrl = preloadedUrls?.get(fileUrl) || null;
+            if (!animationUrl) {
+                animationUrl = await this.downloadManager.getAnimationUrl(fileUrl);
+            }
+
+            await Promise.all([
+                this.playAnimationFromUrl(animationUrl),
+                this.speak(spokenText, speed)
+            ]);
+        } catch (error) {
+            console.warn(`[Headless] Planned animation failed for "${spokenText}":`, error);
+            if (spokenText) {
+                await this.speak(spokenText, speed);
+            }
+        }
+    }
+
+    async playRenderPlan(renderPlan, preloadedUrls = new Map()) {
+        const items = Array.isArray(renderPlan?.items) ? renderPlan.items : [];
+
+        for (const [index, item] of items.entries()) {
+            const isLast = index === items.length - 1;
+            const spokenText = item.spokenText || item.original || '';
+            const speed = item.duration
+                ? (item.duration * 1000) / Math.max(spokenText.length, 1)
+                : (CONFIG.speechSpeed || 150);
+
+            if (item.kind === 'animation' && item.fileUrl) {
+                console.log(`[Headless] Playing planned animation for "${spokenText}" (${item.gloss || 'direct'})`);
+                await this.playRemoteAnimation(item.fileUrl, preloadedUrls, spokenText, speed);
+            } else if (item.kind === 'dactyl' || item.kind === 'partial-dactyl' || item.kind === 'missing') {
+                await this.playPlannedDactyl(item, preloadedUrls, speed);
+            } else if (spokenText) {
+                await this.speak(spokenText, speed);
+            }
+
+            if (!isLast) {
+                await this.waitScaled(ANIMATION_DEFAULTS.PAUSE_BETWEEN_ANIMATIONS);
+            }
+        }
+
+        this.returnToRestPose();
+    }
+
+    async playPlannedDactyl(item, preloadedUrls, speed) {
+        const letters = Array.isArray(item.letters) ? item.letters : [];
+        if (letters.length === 0) {
+            if (item.spokenText || item.original) {
+                await this.speak(item.spokenText || item.original, speed);
+            }
+            return;
+        }
+
+        console.log(`[Headless] Playing planned dactyl for "${item.original}" (${item.foundLetters || 0}/${letters.length})`);
+        for (const [index, letter] of letters.entries()) {
+            const isLastLetter = index === letters.length - 1;
+            const char = letter.char || '';
+
+            if (letter.source === 'local' && letter.animationName) {
+                await Promise.all([
+                    this.playAnimation(letter.animationName),
+                    this.speak(char, speed)
+                ]);
+            } else if (letter.source === 'remote' && letter.fileUrl) {
+                await this.playRemoteAnimation(letter.fileUrl, preloadedUrls, char, speed);
+            } else if (char) {
+                await this.speak(char, speed);
+            }
+
+            if (!isLastLetter) {
+                await this.waitScaled(ANIMATION_DEFAULTS.PAUSE_BETWEEN_ANIMATIONS);
+            }
+        }
+    }
+
+    async waitForEncoderBackpressure(videoEncoder, sleep, maxQueueSize) {
+        while (videoEncoder.encodeQueueSize > maxQueueSize) {
+            await sleep(8);
+        }
+    }
+
     async renderToVideo(config) {
-        const { glosses, avatar, background } = config;
+        const { glosses, avatar, background, renderPlan, renderProfile } = config;
         
         console.log(`[Headless] Starting render for avatar: ${avatar}, glosses: ${glosses}`);
         
@@ -54,19 +160,15 @@ class HeadlessRenderer extends AvatarWidget {
 
         // 3. Pre-fetch and Pre-parse EVERYTHING before recording begins (NO PAUSES IN VIDEO)
         try {
-            const result = await this.downloadManager.translateAndPreload(text);
-            apiResponse = result.response;
-            apiUrls = result.urls;
-
-            // Force parse into Three.js objects right now
-            const { loadAnimation } = await import('../utils/animation-loader.js');
-            if (apiUrls && apiUrls.size > 0 && this.currentVrm) {
-                if (window.reportProgress) window.reportProgress(30, 'Загружаем 3D-данные из подсознания (S3)...');
-                const parsePromises = [...apiUrls.values()].map(blobUrl =>
-                    loadAnimation(blobUrl, this.currentVrm, this.animationCache).catch(() => null)
-                );
-                await Promise.all(parsePromises);
-                console.log('[Headless] All animations fully downloaded and parsed into memory!');
+            if (renderPlan && Array.isArray(renderPlan.items) && renderPlan.items.length > 0) {
+                console.log(`[Headless] Using render plan: ${JSON.stringify(renderPlan.stats || {})}`);
+                apiUrls = await this.preloadRenderPlan(renderPlan);
+                await this.parsePreloadedAnimations(apiUrls);
+            } else {
+                const result = await this.downloadManager.translateAndPreload(text);
+                apiResponse = result.response;
+                apiUrls = result.urls;
+                await this.parsePreloadedAnimations(apiUrls);
             }
         } catch (e) {
             console.error('[Headless] Preload error, will fallback:', e);
@@ -118,6 +220,9 @@ class HeadlessRenderer extends AvatarWidget {
         let rafIdx = 0;
         let isEncoding = true;
         let frameCount = 0;
+        const sleep = (ms) => new Promise(r => originalSetTimeout(r, ms));
+        const maxEncoderQueueSize = renderProfile?.hasGPU ? 12 : 4;
+        console.log(`[Headless] Encoder backpressure queue limit: ${maxEncoderQueueSize}`);
 
         try {
         window.setTimeout = (cb, delay) => {
@@ -145,6 +250,10 @@ class HeadlessRenderer extends AvatarWidget {
         // Background deterministic loop
         const encodingPromise = (async () => {
              while (isEncoding || pendingTimeouts.length > 0) {
+                 if (isEncoding) {
+                     await this.waitForEncoderBackpressure(videoEncoder, sleep, maxEncoderQueueSize);
+                 }
+
                  virtualTime += tickRate;
                  
                  const ripe = [];
@@ -177,7 +286,7 @@ class HeadlessRenderer extends AvatarWidget {
                      }
                  }
                  
-                 await new Promise(r => originalSetTimeout(r, 0));
+                 await sleep(0);
              }
         })();
 
@@ -185,7 +294,9 @@ class HeadlessRenderer extends AvatarWidget {
         if (window.reportProgress) window.reportProgress(50, 'Оживляем аватар в турбо-режиме (30 FPS)...');
 
         // 5. Play sequence smoothly (completely detached from wall-clock time)
-        if (apiResponse && apiResponse.sequence && apiResponse.sequence.length > 0) {
+        if (renderPlan && Array.isArray(renderPlan.items) && renderPlan.items.length > 0) {
+            await this.playRenderPlan(renderPlan, apiUrls);
+        } else if (apiResponse && apiResponse.sequence && apiResponse.sequence.length > 0) {
             await this.playTranslateResponse(apiResponse, apiUrls);
         } else {
             console.warn('[Headless] No valid API sequence returned. Falling back to default playback.');
