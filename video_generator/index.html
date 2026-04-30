@@ -203,7 +203,21 @@
 
         /* Gloss Preview (Emercom mode) */
         .gloss-preview { font-size: 13px; color: var(--text-muted); margin-bottom: 10px; padding: 10px 14px; background: var(--user-bubble); border-radius: 10px; line-height: 1.8; border: 1px solid var(--border-color); }
-        .gloss-label { font-weight: 600; color: var(--text-main); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 4px; }
+        .gloss-label { font-weight: 600; color: var(--text-main); font-size: 11px; text-transform: uppercase; letter-spacing: 0; margin-right: 4px; }
+        .gloss-header { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; position: relative; vertical-align: middle; }
+        .gloss-help-wrap { position: relative; display: inline-flex; align-items: center; }
+        .gloss-help { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border-color); background: var(--input-bg); color: var(--text-muted); font: 700 11px/1 'Inter', sans-serif; cursor: help; display: inline-flex; align-items: center; justify-content: center; padding: 0; transition: border-color 0.15s, color 0.15s, box-shadow 0.15s; }
+        .gloss-help:hover, .gloss-help:focus-visible { color: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); outline: none; }
+        .gloss-legend { position: absolute; top: calc(100% + 8px); left: -8px; z-index: 40; min-width: 190px; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--input-bg); color: var(--text-main); box-shadow: 0 14px 32px rgba(15, 23, 42, 0.16); opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(-4px); transition: opacity 0.15s, visibility 0.15s, transform 0.15s; line-height: 1.4; }
+        body[data-theme="dark"] .gloss-legend { box-shadow: 0 14px 32px rgba(0, 0, 0, 0.35); }
+        .gloss-help-wrap:hover .gloss-legend, .gloss-help:focus + .gloss-legend, .gloss-help:focus-visible + .gloss-legend { opacity: 1; visibility: visible; transform: translateY(0); }
+        .gloss-legend-title { display: block; color: var(--text-main); font-size: 11px; font-weight: 600; margin-bottom: 6px; }
+        .gloss-legend-item { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; white-space: nowrap; margin-top: 5px; }
+        .gloss-legend-swatch { width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0; border: 1px solid transparent; }
+        .gloss-legend-swatch.matched { background: rgba(34, 197, 94, 0.16); border-color: rgba(34, 197, 94, 0.35); }
+        .gloss-legend-swatch.dactyl { background: rgba(59, 130, 246, 0.16); border-color: rgba(59, 130, 246, 0.35); }
+        .gloss-legend-swatch.partial-dactyl { background: rgba(245, 158, 11, 0.16); border-color: rgba(245, 158, 11, 0.35); }
+        .gloss-legend-swatch.missing { background: transparent; border-color: var(--border-color); border-style: dashed; }
         .gloss-token { display: inline-block; padding: 2px 6px; border-radius: 4px; margin: 1px 2px; font-size: 13px; }
         .gloss-token.matched { background: rgba(34, 197, 94, 0.12); color: #16a34a; font-weight: 500; }
         body[data-theme="dark"] .gloss-token.matched { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
@@ -329,6 +343,10 @@
                 <button class="mode-toggle-btn" data-mode="emercom">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
                     <span data-i18n="modeEmercom">ТЖД</span>
+                </button>
+                <button class="mode-toggle-btn" data-mode="preview">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+                    <span data-i18n="modePreview">Тексеру</span>
                 </button>
             </div>
             

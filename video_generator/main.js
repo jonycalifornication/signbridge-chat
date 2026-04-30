@@ -12,6 +12,7 @@ const i18n = {
         newChat: 'Жаңа аударма',
         modeNormal: 'Қарапайым',
         modeEmercom: 'ТЖД',
+        modePreview: 'Тексеру',
         themeToggle: 'Түнгі режим',
         themeToggleLight: 'Күндізгі режим',
         langToggle: 'Қазақша',
@@ -42,6 +43,12 @@ const i18n = {
         download: 'Жүктеу',
         genTime: '⚡ ${sec} секундта жасалды',
         glossLabel: 'Глосстар:',
+        glossHelpLabel: 'Глосс түстерінің мәні',
+        glossLegendTitle: 'Түстер',
+        glossLegendMatched: 'Қимыл табылды',
+        glossLegendDactyl: 'Дактиль',
+        glossLegendPartial: 'Жартылай табылды',
+        glossLegendMissing: 'Табылмады',
         videoExpired: '⏳ Видео орын үнемдеу үшін жойылды',
         regenerate: '🔄 Қайта жасау',
         stepTranslate: 'Аударма',
@@ -60,6 +67,7 @@ const i18n = {
         newChat: 'Новый перевод',
         modeNormal: 'Обычный',
         modeEmercom: 'МЧС',
+        modePreview: 'Проверка',
         themeToggle: 'Тёмная тема',
         themeToggleLight: 'Светлая тема',
         langToggle: 'Русский',
@@ -90,6 +98,12 @@ const i18n = {
         download: 'Скачать',
         genTime: '⚡ Сгенерировано за ${sec}с',
         glossLabel: 'Глоссы:',
+        glossHelpLabel: 'Что означают цвета глоссов',
+        glossLegendTitle: 'Цвета',
+        glossLegendMatched: 'Жест найден',
+        glossLegendDactyl: 'Дактиль',
+        glossLegendPartial: 'Частично найден',
+        glossLegendMissing: 'Не найден',
         videoExpired: '⏳ Видео удалено для экономии места',
         regenerate: '🔄 Сгенерировать заново',
         stepTranslate: 'Перевод',
@@ -189,7 +203,7 @@ let sessions = []; // Will be loaded from server
 let currentSessionId = null;
 let selectedBgColor = 'white';
 let selectedAvatar = 'Aibek'; // Internal name for backend
-let currentMode = 'normal'; // 'normal' | 'emercom'
+let currentMode = 'normal'; // 'normal' | 'emercom' | 'preview'
 
 const MAX_TEXT_LENGTH = 500;
 
@@ -411,7 +425,7 @@ colorOptions.forEach(btn => {
     });
 });
 
-// Mode toggle (normal / emercom)
+// Mode toggle (normal / emercom / preview)
 if (modeToggle) {
     modeToggle.querySelectorAll('.mode-toggle-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -876,22 +890,62 @@ function renderVideoToBubble(bubble, url, preserveGlossPreview, durationSec) {
     }
 }
 
+function getGlossLegendHtml() {
+    const items = [
+        ['matched', t('glossLegendMatched')],
+        ['dactyl', t('glossLegendDactyl')],
+        ['partial-dactyl', t('glossLegendPartial')],
+        ['missing', t('glossLegendMissing')],
+    ];
+
+    return `
+        <span class="gloss-header">
+            <span class="gloss-label">${escapeHtml(t('glossLabel'))}</span>
+            <span class="gloss-help-wrap">
+                <button class="gloss-help" type="button" aria-label="${escapeHtml(t('glossHelpLabel'))}">?</button>
+                <span class="gloss-legend" role="tooltip">
+                    <span class="gloss-legend-title">${escapeHtml(t('glossLegendTitle'))}</span>
+                    ${items.map(([kind, label]) => `
+                        <span class="gloss-legend-item">
+                            <span class="gloss-legend-swatch ${kind}"></span>
+                            <span>${escapeHtml(label)}</span>
+                        </span>
+                    `).join('')}
+                </span>
+            </span>
+        </span>
+    `;
+}
+
+function getGlossTokenStatus(tk) {
+    if (tk.kind === 'dactyl') return t('glossLegendDactyl');
+    if (tk.kind === 'partial-dactyl') return t('glossLegendPartial');
+    if (tk.kind === 'missing') return t('glossLegendMissing');
+    if (tk.kind === 'matched' || tk.matched) return t('glossLegendMatched');
+    return t('glossLegendMissing');
+}
+
+function isGlossTokenMatched(tk) {
+    return tk.kind === 'matched' || tk.matched === true;
+}
+
+function getGlossTokenKindClass(tk) {
+    return ['matched', 'dactyl', 'partial-dactyl', 'missing'].includes(tk.kind) ? tk.kind : '';
+}
+
 function renderGlossPreview(bubble, tokens) {
     bubble.querySelector('.gloss-preview')?.remove();
     const div = document.createElement('div');
     div.className = 'gloss-preview';
-    div.innerHTML = '<span class="gloss-label">' + t('glossLabel') + '</span> ' +
+    div.innerHTML = getGlossLegendHtml() +
         tokens.map(tk => {
-            const baseCls = tk.matched ? 'matched' : 'unmatched';
-            const kindCls = ['matched', 'dactyl', 'partial-dactyl', 'missing'].includes(tk.kind) ? tk.kind : '';
+            const baseCls = isGlossTokenMatched(tk) ? 'matched' : 'unmatched';
+            const kindCls = getGlossTokenKindClass(tk);
             const cls = [baseCls, kindCls].filter(Boolean).join(' ');
             const original = tk.original || '';
             const gloss = tk.gloss || original;
-            const title = tk.kind === 'dactyl'
-                ? `${original} - дактиль`
-                : tk.kind === 'partial-dactyl'
-                    ? `${original} - частичный дактиль`
-                    : original;
+            const status = getGlossTokenStatus(tk);
+            const title = original && original !== gloss ? `${status}: ${original}` : status;
             return `<span class="gloss-token ${cls}" title="${escapeHtml(title)}">${escapeHtml(gloss)}</span>`;
         }).join(' ');
     bubble.prepend(div);
@@ -1006,8 +1060,7 @@ function regenerateVideo(msgId, glosses) {
     triggerFetch(glosses, msgId, bubble, bg, av, md);
 }
 
-function applyServerGlossPreview(data, msgId, bubble, mode) {
-    if (mode !== 'normal') return null;
+function applyServerGlossPreview(data, msgId, bubble) {
     if (!Array.isArray(data?.glossTokens) || data.glossTokens.length === 0) return null;
 
     const preview = {
@@ -1022,6 +1075,40 @@ function applyServerGlossPreview(data, msgId, bubble, mode) {
     }
 
     return preview;
+}
+
+async function triggerGlossPreview(text, msgId, bubbleNode) {
+    bubbleNode.dataset.startTime = Date.now();
+
+    try {
+        const response = await fetch('/api/v1/video/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ glosses: text })
+        });
+
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || 'Preview error');
+        }
+
+        const data = await response.json();
+        const preview = applyServerGlossPreview(data, msgId, bubbleNode);
+        if (!preview) {
+            throw new Error('No gloss preview returned');
+        }
+
+        updateSessionParam(msgId, {
+            ...preview,
+            taskId: null,
+            videoUrl: null,
+            error: null,
+            timestamp: Date.now()
+        });
+    } catch (err) {
+        updateSessionParam(msgId, { error: err.message, videoUrl: null, taskId: null });
+        bubbleNode.innerHTML = `<span class="error-text">${t('error')}${escapeHtml(err.message)}</span>`;
+    }
 }
 
 async function triggerGenerate() {
@@ -1086,12 +1173,17 @@ async function triggerGenerate() {
     row.appendChild(bubble);
     chatMessages.appendChild(row);
 
-    // Show gloss preview with highlighting in emercom mode
+    // Show immediate local gloss preview when available.
     if (glossTokens) {
         renderGlossPreview(bubble, glossTokens);
     }
 
     scrollToBottom();
+    if (modeAtSend === 'preview') {
+        await triggerGlossPreview(glossText, msgId, bubble);
+        return;
+    }
+
     triggerFetch(glossText, msgId, bubble, bgAtSend, avatarAtSend, modeAtSend);
 }
 
@@ -1116,7 +1208,7 @@ async function triggerFetch(text, msgId, bubbleNode, overrideBg, overrideAvatar,
         });
         if (!response.ok) throw new Error('Server error');
         const data = await response.json();
-        const preview = applyServerGlossPreview(data, msgId, bubbleNode, mode);
+        const preview = applyServerGlossPreview(data, msgId, bubbleNode);
         
         // Save Task ID locally and on server (asyncly)
         updateSessionParam(msgId, { taskId: data.taskId, ...(preview || {}) });

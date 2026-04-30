@@ -359,6 +359,33 @@ app.post('/api/v1/video/generate', rateLimit, async (req, res) => {
 });
 
 
+/**
+ * Preview gloss availability without launching the video renderer.
+ */
+app.post('/api/v1/video/preview', rateLimit, async (req, res) => {
+    const { glosses } = req.body;
+
+    if (!glosses || (!Array.isArray(glosses) && typeof glosses !== 'string')) {
+        return res.status(400).json({ error: 'glosses missing or invalid' });
+    }
+
+    try {
+        const appUrl = process.env.APP_URL || 'http://localhost:5173';
+        const renderPlan = await buildRenderPlan(glosses, resolveRenderPlanApiConfig(appUrl));
+        const renderPreview = renderPlanToGlossPreview(renderPlan);
+
+        if (!renderPreview || !Array.isArray(renderPreview.glossTokens)) {
+            return res.status(502).json({ error: 'Gloss preview unavailable' });
+        }
+
+        res.json({ status: 'ready', ...renderPreview });
+    } catch (error) {
+        console.error('[Server preview] Gloss preview error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
 
 /**
  * v2: Asynchronous Task Creation
