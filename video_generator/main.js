@@ -921,12 +921,12 @@ function getGlossTokenStatus(tk) {
     if (tk.kind === 'dactyl') return t('glossLegendDactyl');
     if (tk.kind === 'partial-dactyl') return t('glossLegendPartial');
     if (tk.kind === 'missing') return t('glossLegendMissing');
-    if (tk.kind === 'matched' || tk.matched) return t('glossLegendMatched');
+    if (tk.kind === 'matched') return t('glossLegendMatched');
     return t('glossLegendMissing');
 }
 
 function isGlossTokenMatched(tk) {
-    return tk.kind === 'matched' || tk.matched === true;
+    return tk.kind === 'matched';
 }
 
 function getGlossTokenKindClass(tk) {
@@ -1131,21 +1131,18 @@ async function triggerGenerate() {
     SoundFX.playPop();
     bumpUnread();
 
-    // Emercom mode: convert text → glosses
+    // Convert text to CSV glosses for every video-generator mode.
+    // Colors still come only from the server render-plan, not from CSV matches.
     let glossText = text;
-    let glossTokens = null;
     let glossPreview = null;
-    if (modeAtSend === 'emercom') {
-        try {
-            const lang = detectDictLang(text);
-            await loadDictionary(lang);
-            const result = textToGlosses(text);
-            glossText = result.glosses;
-            glossTokens = result.tokens;
-            glossPreview = result.glosses;
-        } catch (e) {
-            console.error('[Emercom] Gloss conversion failed:', e);
-        }
+    try {
+        const lang = detectDictLang(text);
+        await loadDictionary(lang);
+        const result = textToGlosses(text);
+        glossText = result.glosses;
+        glossPreview = result.glosses !== text ? result.glosses : null;
+    } catch (e) {
+        console.error('[Gloss] CSV conversion failed:', e);
     }
 
     const msgId = _uid('msg_');
@@ -1154,7 +1151,7 @@ async function triggerGenerate() {
         msgId: msgId,
         glosses: glossText,
         glossPreview,
-        glossTokens,
+        glossTokens: null,
         timestamp: Date.now(),
         taskId: null,
         bgColor: bgAtSend,
@@ -1173,9 +1170,9 @@ async function triggerGenerate() {
     row.appendChild(bubble);
     chatMessages.appendChild(row);
 
-    // Show immediate local gloss preview when available.
-    if (glossTokens) {
-        renderGlossPreview(bubble, glossTokens);
+    // Show converted CSV glosses without colors while server checks animation availability.
+    if (glossPreview) {
+        renderGlossPreviewSimple(bubble, glossPreview);
     }
 
     scrollToBottom();
