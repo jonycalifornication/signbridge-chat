@@ -955,6 +955,18 @@ export class AvatarWidget {
             if (this.currentActiveViseme) {
                 this.setExpression(this.currentActiveViseme.name, 0);
             }
+            
+            // Hard reset all vowel visemes to 0 directly to prevent bleeding
+            // ('aa' might override 'oh' if not explicitly reset)
+            if (this.currentVrm.expressionManager) {
+                ['aa', 'ih', 'ou', 'ee', 'oh'].forEach(v => {
+                    if (v !== event.name) {
+                        this.currentVrm.expressionManager.setValue(v, 0);
+                        this.setExpression(v, 0);
+                    }
+                });
+            }
+
             if (event.name !== 'neutral') {
                 this.setExpression(event.name, event.value);
                 this.currentActiveViseme = {

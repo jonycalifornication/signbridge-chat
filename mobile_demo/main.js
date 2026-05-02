@@ -311,6 +311,17 @@ class MobileAvatarApp {
             if (this.currentActiveViseme) {
                 this.setExpression(this.currentActiveViseme.name, 0);
             }
+            
+            // Hard reset all vowel visemes to 0 directly to prevent bleeding
+            if (this.currentVrm?.expressionManager) {
+                ['aa', 'ih', 'ou', 'ee', 'oh'].forEach(v => {
+                    if (v !== event.preset) {
+                        this.currentVrm.expressionManager.setValue(v, 0);
+                        this.setExpression(v, 0);
+                    }
+                });
+            }
+
             // Activate new viseme
             if (event.preset !== 'neutral') {
                 this.setExpression(event.preset, event.value ?? 0.8);

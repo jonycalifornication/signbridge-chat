@@ -35,10 +35,9 @@ const CHAR_TO_VISEME = {
     'л': 'oh', 'р': 'oh',
     'l': 'oh', 'r': 'oh',
 
-    // Velar/Guttural: K, G, X -> aa (Open mouth often) or ih (if tighter)
-    // Relaxed 'aa' usually fits context of speech
-    'к': 'aa', 'г': 'aa', 'х': 'aa', 'ж': 'aa', 'ш': 'aa',
-    'k': 'aa', 'g': 'aa', 'x': 'aa', 'j': 'aa'
+    // Velar/Guttural: K, G, X -> ih (if tighter) works better and prevents bleeding into 'O'
+    'к': 'ih', 'г': 'ih', 'х': 'ih', 'ж': 'ih', 'ш': 'ih',
+    'k': 'ih', 'g': 'ih', 'x': 'ih', 'j': 'ih'
 };
 
 const VOWELS = new Set(['а', 'a', 'ә', 'я', 'и', 'й', 'ы', 'і', 'i', 'e', 'у', 'ұ', 'ү', 'ю', 'u', 'w', 'е', 'ё', 'э', 'о', 'ө', 'o']);
@@ -78,7 +77,7 @@ export function textToVisemeSequence(text, baseSpeed = 100) {
         // Consonants vary. Closed consonants (m, b, p) are 0 intensity (neutral).
         let intensity = isVowel ? 0.85 : 0.6;
 
-        let preset = CHAR_TO_VISEME[char] || 'aa';
+        let preset = CHAR_TO_VISEME[char] || 'ih';
 
         // Specific overrides
         if (['б', 'п', 'м', 'b', 'p', 'm'].includes(char)) {
