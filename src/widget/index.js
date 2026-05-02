@@ -1049,6 +1049,9 @@ export class AvatarWidget {
                 } else if (this.currentActiveViseme.name === 'aa_ee_combo') {
                     this.setExpression('aa', 0);
                     this.setExpression('ee', 0);
+                } else if (this.currentActiveViseme.name === 'eh_combo') {
+                    this.setExpression('aa', 0);
+                    this.setExpression('ee', 0);
                 } else {
                     this.setExpression(this.currentActiveViseme.name, 0);
                 }
@@ -1084,6 +1087,9 @@ export class AvatarWidget {
                 } else if (this.currentActiveViseme.name === 'aa_ee_combo') {
                     this.setExpression('aa', 0);
                     this.setExpression('ee', 0);
+                } else if (this.currentActiveViseme.name === 'eh_combo') {
+                    this.setExpression('aa', 0);
+                    this.setExpression('ee', 0);
                 } else {
                     this.setExpression(this.currentActiveViseme.name, 0);
                 }
@@ -1095,6 +1101,7 @@ export class AvatarWidget {
                 let skipReset = [event.name];
                 if (event.name === 'ou_oh_combo') skipReset = ['ou', 'oh'];
                 if (event.name === 'aa_ee_combo') skipReset = ['aa', 'ee'];
+                if (event.name === 'eh_combo') skipReset = ['aa', 'ee'];
                 
                 ['aa', 'ih', 'ou', 'ee', 'oh'].forEach(v => {
                     if (!skipReset.includes(v)) {
@@ -1116,6 +1123,13 @@ export class AvatarWidget {
                 this.setExpression('ee', event.value * 0.6);
                 this.currentActiveViseme = {
                     name: 'aa_ee_combo',
+                    endTime: event.time + event.duration
+                };
+            } else if (event.name === 'eh_combo') {
+                this.setExpression('aa', event.value * 0.6);
+                this.setExpression('ee', event.value * 0.6);
+                this.currentActiveViseme = {
+                    name: 'eh_combo',
                     endTime: event.time + event.duration
                 };
             } else if (event.name !== 'neutral') {

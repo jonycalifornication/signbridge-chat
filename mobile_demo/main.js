@@ -315,6 +315,9 @@ class MobileAvatarApp {
                 } else if (this.currentActiveViseme.name === 'aa_ee_combo') {
                     this.setExpression('aa', 0);
                     this.setExpression('ee', 0);
+                } else if (this.currentActiveViseme.name === 'eh_combo') {
+                    this.setExpression('aa', 0);
+                    this.setExpression('ee', 0);
                 } else {
                     this.setExpression(this.currentActiveViseme.name, 0);
                 }
@@ -325,6 +328,7 @@ class MobileAvatarApp {
                 let skipReset = [event.preset];
                 if (event.preset === 'ou_oh_combo') skipReset = ['ou', 'oh'];
                 if (event.preset === 'aa_ee_combo') skipReset = ['aa', 'ee'];
+                if (event.preset === 'eh_combo') skipReset = ['aa', 'ee'];
                 ['aa', 'ih', 'ou', 'ee', 'oh'].forEach(v => {
                     if (!skipReset.includes(v)) {
                         this.currentVrm.expressionManager.setValue(v, 0);
@@ -350,6 +354,14 @@ class MobileAvatarApp {
                     name: 'aa_ee_combo',
                     endTime: event.time + event.duration,
                 };
+            } else if (event.preset === 'eh_combo') {
+                const val = event.value ?? 0.8;
+                this.setExpression('aa', val * 0.6);
+                this.setExpression('ee', val * 0.6);
+                this.currentActiveViseme = {
+                    name: 'eh_combo',
+                    endTime: event.time + event.duration,
+                };
             } else if (event.preset !== 'neutral') {
                 this.setExpression(event.preset, event.value ?? 0.8);
                 this.currentActiveViseme = {
@@ -368,6 +380,9 @@ class MobileAvatarApp {
                 this.setExpression('ou', 0);
                 this.setExpression('oh', 0);
             } else if (this.currentActiveViseme.name === 'aa_ee_combo') {
+                this.setExpression('aa', 0);
+                this.setExpression('ee', 0);
+            } else if (this.currentActiveViseme.name === 'eh_combo') {
                 this.setExpression('aa', 0);
                 this.setExpression('ee', 0);
             } else {
