@@ -11,4 +11,8 @@ describe('render plan normalization', () => {
     it('still expands standalone numbers', () => {
         expect(normalizeRenderText('128518')).toBe('100 20 8 1000 500 18');
     });
+
+    it('normalizes numeric ranges and slash units before rendering', () => {
+        expect(normalizeRenderText('15-20 м/с')).toBe('15 20 м с');
+    });
 });

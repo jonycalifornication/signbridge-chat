@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { expandNumbersInText, numberToGlossParts, numberToGlossText } from '../../src/utils/number-glosses.js';
+import {
+    expandNumbersInText,
+    expandNumericRangesInText,
+    expandSlashUnitsInText,
+    normalizeNumericText,
+    numberToGlossParts,
+    numberToGlossText
+} from '../../src/utils/number-glosses.js';
 
 describe('number glosses', () => {
     it('keeps base numeric glosses intact', () => {
@@ -30,5 +37,21 @@ describe('number glosses', () => {
         expect(expandNumbersInText('код 128518 готов')).toBe('код 100 20 8 1000 500 18 готов');
         expect(expandNumbersInText('17.10.25ж')).toBe('17.10.25ж');
         expect(expandNumbersInText('03-04.09.25')).toBe('03-04.09.25');
+    });
+
+    it('expands numeric ranges before standalone numbers', () => {
+        expect(expandNumericRangesInText('15-20 м/с')).toBe('15 20 м/с');
+        expect(expandNumericRangesInText('128-518')).toBe('100 20 8 500 18');
+        expect(expandNumericRangesInText('03-04.09.25')).toBe('03-04.09.25');
+    });
+
+    it('splits slash-separated measurement units', () => {
+        expect(expandSlashUnitsInText('15 20 м/с')).toBe('15 20 м с');
+        expect(expandSlashUnitsInText('40 км/ч')).toBe('40 км ч');
+        expect(expandSlashUnitsInText('5 мг / л')).toBe('5 мг л');
+    });
+
+    it('normalizes numeric ranges with slash units', () => {
+        expect(normalizeNumericText('15-20 м/с')).toBe('15 20 м с');
     });
 });

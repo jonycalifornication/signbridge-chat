@@ -3,7 +3,7 @@ import {
     KAZAKH_DATE_SUFFIX_RE,
     RUSSIAN_DATE_SUFFIX_RE
 } from '../src/utils/date-glosses.js';
-import { expandNumbersInText } from '../src/utils/number-glosses.js';
+import { normalizeNumericText } from '../src/utils/number-glosses.js';
 
 const dictionaries = {};
 let activeDictionary = null;
@@ -15,7 +15,7 @@ export function processEmercomDates(text, lang) {
 }
 
 export function processEmercomNumbers(text) {
-    return expandNumbersInText(text);
+    return normalizeNumericText(text);
 }
 
 function parseCSV(text) {
