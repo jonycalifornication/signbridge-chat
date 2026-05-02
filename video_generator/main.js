@@ -959,6 +959,21 @@ function renderGlossPreviewSimple(bubble, glossText) {
     bubble.prepend(div);
 }
 
+function useDisplayGlosses(tokens, displayGlossText) {
+    if (!displayGlossText) return tokens;
+    const displayText = String(displayGlossText).trim();
+    const displayParts = displayText.split(/\s+/).filter(Boolean);
+    return tokens.map((token, index) => ({
+        ...token,
+        backendGloss: token.gloss,
+        gloss: tokens.length === 1 && displayText
+            ? displayText
+            : displayParts.length === tokens.length
+                ? displayParts[index]
+                : token.original || token.gloss || ''
+    }));
+}
+
 function renderSkeleton(bubble) {
     // Preserve gloss preview if present
     const glossPreview = bubble.querySelector('.gloss-preview');
@@ -1057,27 +1072,28 @@ function regenerateVideo(msgId, glosses) {
     const av = msg?.avatar || selectedAvatar;
     const md = msg?.mode || currentMode;
     SoundFX.playPop();
-    triggerFetch(glosses, msgId, bubble, bg, av, md);
+    triggerFetch(glosses, msgId, bubble, bg, av, md, msg?.glossPreview || null);
 }
 
-function applyServerGlossPreview(data, msgId, bubble) {
+function applyServerGlossPreview(data, msgId, bubble, displayGlossText = null) {
     if (!Array.isArray(data?.glossTokens) || data.glossTokens.length === 0) return null;
+    const glossTokens = useDisplayGlosses(data.glossTokens, displayGlossText);
 
     const preview = {
-        glossPreview: data.glossPreview || data.glossTokens.map(token => token.gloss).join(' '),
-        glossTokens: data.glossTokens
+        glossPreview: glossTokens.map(token => token.gloss).join(' '),
+        glossTokens
     };
 
     const liveRow = document.getElementById(msgId);
     const liveBubble = liveRow?.querySelector('.bubble') || bubble;
     if (liveRow && liveBubble) {
-        renderGlossPreview(liveBubble, data.glossTokens);
+        renderGlossPreview(liveBubble, glossTokens);
     }
 
     return preview;
 }
 
-async function triggerGlossPreview(text, msgId, bubbleNode) {
+async function triggerGlossPreview(text, msgId, bubbleNode, displayGlossText = null) {
     bubbleNode.dataset.startTime = Date.now();
 
     try {
@@ -1093,7 +1109,7 @@ async function triggerGlossPreview(text, msgId, bubbleNode) {
         }
 
         const data = await response.json();
-        const preview = applyServerGlossPreview(data, msgId, bubbleNode);
+        const preview = applyServerGlossPreview(data, msgId, bubbleNode, displayGlossText);
         if (!preview) {
             throw new Error('No gloss preview returned');
         }
@@ -1177,14 +1193,14 @@ async function triggerGenerate() {
 
     scrollToBottom();
     if (modeAtSend === 'preview') {
-        await triggerGlossPreview(glossText, msgId, bubble);
+        await triggerGlossPreview(glossText, msgId, bubble, glossPreview);
         return;
     }
 
-    triggerFetch(glossText, msgId, bubble, bgAtSend, avatarAtSend, modeAtSend);
+    triggerFetch(glossText, msgId, bubble, bgAtSend, avatarAtSend, modeAtSend, glossPreview);
 }
 
-async function triggerFetch(text, msgId, bubbleNode, overrideBg, overrideAvatar, overrideMode) {
+async function triggerFetch(text, msgId, bubbleNode, overrideBg, overrideAvatar, overrideMode, displayGlossText = null) {
     renderSkeleton(bubbleNode);
     bubbleNode.dataset.startTime = Date.now();
     const bg = overrideBg || selectedBgColor;
@@ -1205,7 +1221,7 @@ async function triggerFetch(text, msgId, bubbleNode, overrideBg, overrideAvatar,
         });
         if (!response.ok) throw new Error('Server error');
         const data = await response.json();
-        const preview = applyServerGlossPreview(data, msgId, bubbleNode);
+        const preview = applyServerGlossPreview(data, msgId, bubbleNode, displayGlossText);
         
         // Save Task ID locally and on server (asyncly)
         updateSessionParam(msgId, { taskId: data.taskId, ...(preview || {}) });
