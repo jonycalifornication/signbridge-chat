@@ -300,6 +300,53 @@ canvas {
     transform: scale(0.95);
 }
 
+.widget-language-toggle {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    z-index: 12;
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 8px;
+    background: rgba(17, 24, 39, 0.68);
+    backdrop-filter: blur(10px);
+    pointer-events: auto;
+    opacity: 0;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    transform: translateY(4px);
+}
+
+#avatar-widget-container.expanded .widget-language-toggle,
+#standalone-widget.expanded .widget-language-toggle,
+.expanded > .widget-language-toggle {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.widget-language-btn {
+    min-width: 34px;
+    height: 26px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.78);
+    font: 700 11px/1 Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+    letter-spacing: 0;
+    cursor: pointer;
+}
+
+.widget-language-btn.active {
+    background: #ffffff;
+    color: #111827;
+}
+
+.widget-language-btn:focus-visible {
+    outline: 2px solid #60a5fa;
+    outline-offset: 2px;
+}
+
 /* Селектор аватара - компактная версия */
 .avatar-selector {
     background: rgba(255, 255, 255, 0.95);
