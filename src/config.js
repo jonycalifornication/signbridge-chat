@@ -1,3 +1,12 @@
+import {
+    AUTO_LANGUAGE_MODE,
+    DEFAULT_LANGUAGE_ID,
+    DEFAULT_LANGUAGE_PRIORITY,
+    normalizeLanguageId,
+    normalizeLanguageMode,
+    parseLanguagePriority
+} from './utils/language-mode.js';
+
 /**
  * Application configuration
  * @typedef {Object} AvatarConfig
@@ -11,10 +20,23 @@
  * @readonly
  */
 const ENV = import.meta.env || {};
+const RUNTIME_CONFIG = typeof window !== 'undefined'
+    ? (window.SignBridgeWidgetConfig || window.SIGNBRIDGE_WIDGET_CONFIG || {})
+    : {};
 
 const readEnv = (name, fallback = '') => {
     const value = ENV[name];
     return typeof value === 'string' && value.length > 0 ? value : fallback;
+};
+
+const readRuntime = (name, fallback = '') => {
+    const value = RUNTIME_CONFIG[name];
+    return typeof value === 'string' && value.length > 0 ? value : fallback;
+};
+
+const readSetting = (runtimeName, envName, fallback = '') => {
+    const runtimeValue = readRuntime(runtimeName, '');
+    return runtimeValue || readEnv(envName, fallback);
 };
 
 const getModuleOrigin = () => {
@@ -56,7 +78,12 @@ export const CONFIG = Object.freeze({
     // API settings (configured via .env / Vite env vars)
     apiUrl: normalizeApiUrl(readEnv('VITE_API_URL', '/api/v1')),
     apiKey: readEnv('VITE_API_KEY', ''), // X-API-Key for signBridgeStorage translate endpoint
-    languageId: readEnv('VITE_LANGUAGE_ID', 'kz_KSL'),
+    languageId: normalizeLanguageId(readSetting('languageId', 'VITE_LANGUAGE_ID', DEFAULT_LANGUAGE_ID)),
+    languageMode: normalizeLanguageMode(readSetting('languageMode', 'VITE_LANGUAGE_MODE', AUTO_LANGUAGE_MODE)),
+    languagePriority: parseLanguagePriority(
+        RUNTIME_CONFIG.languagePriority || readEnv('VITE_LANGUAGE_PRIORITY', DEFAULT_LANGUAGE_PRIORITY.join(',')),
+        DEFAULT_LANGUAGE_PRIORITY
+    ),
 
     // Telegram Error Logging config
     telegram: {

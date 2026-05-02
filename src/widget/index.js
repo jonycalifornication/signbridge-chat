@@ -5,9 +5,17 @@ import { loadVRMModel, disposeVRM } from '../utils/vrm-loader.js';
 import { CAMERA_DEFAULTS, ANIMATION_DEFAULTS, RENDERER_DEFAULTS, LIGHTS } from '../utils/constants.js';
 import { CONFIG } from '../config.js';
 import { getDownloadManager } from '../utils/animation-download-manager.js';
+import { getLanguageIdsForMode, normalizeLanguageMode } from '../utils/language-mode.js';
 import { logDeviceInfo } from '../utils/device-logger.js';
 import { createRestPoseClip } from '../utils/rest-pose.js';
 import { initGlobalErrorLogger, sendErrorToTelegram } from '../utils/telegram-logger.js';
+
+const LANGUAGE_MODE_STORAGE_KEY = 'signbridge_widget_language_mode';
+const LANGUAGE_MODE_OPTIONS = [
+    { value: 'auto', label: 'Auto', title: 'Авто' },
+    { value: 'kz_KSL', label: 'ҚҚ', title: 'Қазақша' },
+    { value: 'ru_RSL', label: 'RU', title: 'Русский' },
+];
 
 /**
  * Compact avatar widget with text selection trigger
@@ -38,6 +46,10 @@ export class AvatarWidget {
         this.isExpanded = false;
         this.playbackRate = 1;
         this.playbackSpeed = ANIMATION_DEFAULTS.DEFAULT_PLAYBACK_SPEED;
+        this.languageMode = this.loadLanguageMode();
+        this.currentTranslationLanguageId = CONFIG.languageId;
+        this.languageControls = null;
+        this.languageModeButtons = new Map();
 
         // Expression state
         this.currentExpressionSequence = null;
@@ -63,6 +75,7 @@ export class AvatarWidget {
 
         this.init();
         this.setupUI();
+        this.setupLanguageControls();
         this.setupTextSelection();
         this.setupWidgetToggle();
     }
@@ -205,6 +218,105 @@ export class AvatarWidget {
         select.addEventListener('change', (e) => this.loadModelByName(e.target.value));
     }
 
+    loadLanguageMode() {
+        try {
+            const savedMode = localStorage.getItem(LANGUAGE_MODE_STORAGE_KEY);
+            if (savedMode) return normalizeLanguageMode(savedMode, CONFIG.languageMode);
+        } catch {
+            // localStorage can be unavailable in restricted embeds.
+        }
+
+        return normalizeLanguageMode(CONFIG.languageMode, 'auto');
+    }
+
+    getLanguageIdsForCurrentMode() {
+        return getLanguageIdsForMode(this.languageMode, CONFIG.languagePriority, CONFIG.languageId);
+    }
+
+    setLanguageMode(mode, { persist = true } = {}) {
+        this.languageMode = normalizeLanguageMode(mode, CONFIG.languageMode);
+
+        for (const [value, button] of this.languageModeButtons.entries()) {
+            const active = value === this.languageMode;
+            button.classList.toggle('active', active);
+            button.setAttribute('aria-pressed', active ? 'true' : 'false');
+            button.style.background = active ? '#ffffff' : 'transparent';
+            button.style.color = active ? '#111827' : 'rgba(255, 255, 255, 0.78)';
+        }
+
+        if (persist) {
+            try {
+                localStorage.setItem(LANGUAGE_MODE_STORAGE_KEY, this.languageMode);
+            } catch {
+                // Ignore storage failures in third-party embeds.
+            }
+        }
+
+        console.log(`[Avatar] Language mode: ${this.languageMode}`);
+    }
+
+    setupLanguageControls() {
+        const controls = document.createElement('div');
+        controls.className = 'widget-language-toggle';
+        controls.setAttribute('role', 'group');
+        controls.setAttribute('aria-label', 'Sign language');
+        Object.assign(controls.style, {
+            position: 'absolute',
+            left: '10px',
+            bottom: '10px',
+            zIndex: '12',
+            display: 'inline-flex',
+            gap: '2px',
+            padding: '3px',
+            borderRadius: '8px',
+            background: 'rgba(17, 24, 39, 0.68)',
+            backdropFilter: 'blur(10px)',
+            pointerEvents: 'auto',
+            opacity: '0',
+            transform: 'translateY(4px)',
+            transition: 'opacity 0.2s ease, transform 0.2s ease',
+        });
+
+        for (const option of LANGUAGE_MODE_OPTIONS) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'widget-language-btn';
+            button.textContent = option.label;
+            button.title = option.title;
+            button.setAttribute('aria-label', option.title);
+            Object.assign(button.style, {
+                minWidth: '34px',
+                height: '26px',
+                padding: '0 8px',
+                border: '0',
+                borderRadius: '6px',
+                background: 'transparent',
+                color: 'rgba(255, 255, 255, 0.78)',
+                font: '700 11px/1 Inter, -apple-system, BlinkMacSystemFont, sans-serif',
+                letterSpacing: '0',
+                cursor: 'pointer',
+            });
+            button.addEventListener('click', (event) => {
+                event.stopPropagation();
+                this.setLanguageMode(option.value);
+            });
+            controls.appendChild(button);
+            this.languageModeButtons.set(option.value, button);
+        }
+
+        this.languageControls = controls;
+        this.container.appendChild(controls);
+        this.setLanguageMode(this.languageMode, { persist: false });
+        this.updateLanguageControlsVisibility();
+    }
+
+    updateLanguageControlsVisibility() {
+        if (!this.languageControls) return;
+
+        this.languageControls.style.opacity = this.isExpanded ? '1' : '0';
+        this.languageControls.style.transform = this.isExpanded ? 'translateY(0)' : 'translateY(4px)';
+    }
+
     /** Setup text selection handlers */
     setupTextSelection() {
         document.addEventListener('mouseup', () => this.handleTextSelection());
@@ -233,10 +345,13 @@ export class AvatarWidget {
             console.log(`[Avatar] Requesting translation for: "${selectedText}"`);
 
             // Use download manager to translate and preload all VRMA files
-            const { response, urls } = await this.downloadManager.translateAndPreload(selectedText);
+            const languageIds = this.getLanguageIdsForCurrentMode();
+            const { response, urls, languageId } = await this.downloadManager.translateAndPreloadAny(selectedText, languageIds);
+            this.currentTranslationLanguageId = languageId || response?.language_id || languageIds[0] || CONFIG.languageId;
+            console.log(`[Avatar] Using language: ${this.currentTranslationLanguageId}`);
 
             if (response.sequence && response.sequence.length > 0) {
-                await this.playTranslateResponse(response, urls);
+                await this.playTranslateResponse(response, urls, this.currentTranslationLanguageId);
                 return;
             }
             console.warn('[Avatar] API returned no usable animations, falling back to local config');
@@ -250,11 +365,11 @@ export class AvatarWidget {
         // Fallback to local config lookup + always articulate lips
         let bodyPromise = Promise.resolve();
         if (CONFIG.animations[selectedText]) {
-            bodyPromise = this.playAnimation(selectedText);
+            bodyPromise = this.playAnimation(selectedText, this.currentTranslationLanguageId);
         } else {
             for (const animName in CONFIG.animations) {
                 if (selectedText.includes(animName)) {
-                    bodyPromise = this.playAnimation(animName);
+                    bodyPromise = this.playAnimation(animName, this.currentTranslationLanguageId);
                     break;
                 }
             }
@@ -267,7 +382,7 @@ export class AvatarWidget {
      * @param {string} text
      * @param {number} speed
      */
-    async playTextAsLetters(text, speed = CONFIG.speechSpeed || 150) {
+    async playTextAsLetters(text, speed = CONFIG.speechSpeed || 150, languageId = this.currentTranslationLanguageId) {
         const letters = Array.from((text || '').toLowerCase())
             .filter((char) => /[0-9A-Za-z\u0400-\u04FF]/.test(char));
 
@@ -291,7 +406,7 @@ export class AvatarWidget {
                 try {
                     const { getApiClient } = await import('../utils/api-client.js');
                     const apiClient = getApiClient();
-                    const response = await apiClient.translate(letter);
+                    const response = await apiClient.translate(letter, languageId);
                     if (response?.sequence?.length > 0) {
                         const seq = response.sequence[0];
                         if (seq.found && seq.file_url) {
@@ -338,7 +453,7 @@ export class AvatarWidget {
      * @param {Object} response
      * @param {Map<string, string>} [preloadedUrls]
      */
-    async playTranslateResponse(response, preloadedUrls = null) {
+    async playTranslateResponse(response, preloadedUrls = null, languageId = response?.language_id || this.currentTranslationLanguageId) {
         const sequence = Array.isArray(response?.sequence) ? response.sequence : [];
 
         if (sequence.length === 0) {
@@ -395,11 +510,11 @@ export class AvatarWidget {
                         this.speak(spokenText, lipSpeed)
                     ]);
                 } else if (spokenText) {
-                    await this.playTextAsLetters(spokenText, lipSpeed);
+                    await this.playTextAsLetters(spokenText, lipSpeed, languageId);
                 }
             } else if (spokenText) {
                 console.warn(`[Avatar] No animation found for word: "${item.word || spokenText}". Falling back to letters.`);
-                await this.playTextAsLetters(spokenText, lipSpeed);
+                await this.playTextAsLetters(spokenText, lipSpeed, languageId);
             }
 
             if (!isLast) {
@@ -436,6 +551,7 @@ export class AvatarWidget {
         this.isExpanded = true;
         this.container.classList.remove('compact');
         this.container.classList.add('expanded');
+        this.updateLanguageControlsVisibility();
     }
 
     /** Collapse widget */
@@ -444,6 +560,7 @@ export class AvatarWidget {
         this.isExpanded = false;
         this.container.classList.remove('expanded');
         this.container.classList.add('compact');
+        this.updateLanguageControlsVisibility();
     }
 
     /**
@@ -620,7 +737,7 @@ export class AvatarWidget {
      * Play named animation
      * @param {string} name - Animation name or gloss
      */
-    async playAnimation(name) {
+    async playAnimation(name, languageId = this.currentTranslationLanguageId) {
         // Try local config first
         if (CONFIG.animations[name]) {
             return this.playAnimationFromUrl(CONFIG.animations[name]);
@@ -632,7 +749,7 @@ export class AvatarWidget {
             const { getApiClient } = await import('../utils/api-client.js');
             const apiClient = getApiClient();
             
-            const response = await apiClient.translate(name);
+            const response = await apiClient.translate(name, languageId);
             if (response && response.sequence && response.sequence.length > 0) {
                 const seq = response.sequence[0];
                 if (seq.found && seq.file_url) {

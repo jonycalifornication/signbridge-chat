@@ -5,6 +5,7 @@
  */
 
 import { CONFIG } from '../config.js';
+import { DEFAULT_LANGUAGE_ID, normalizeLanguageId } from './language-mode.js';
 
 /**
  * @typedef {Object} AnimationSequenceItem
@@ -38,7 +39,7 @@ export class ApiClient {
     constructor(options = {}) {
         this.baseUrl = options.baseUrl || CONFIG.apiUrl || 'http://localhost:8000/api/v1';
         this.apiKey = options.apiKey || CONFIG.apiKey || '';
-        this.languageId = options.languageId || CONFIG.languageId || 'kz_KSL';
+        this.languageId = normalizeLanguageId(options.languageId || CONFIG.languageId, DEFAULT_LANGUAGE_ID);
         this.timeout = options.timeout || 10000;
 
         // Remove trailing slash
@@ -90,7 +91,7 @@ export class ApiClient {
         const url = `${this.baseUrl}/translate/`;
         const body = {
             text: text,
-            language_id: languageId || this.languageId,
+            language_id: normalizeLanguageId(languageId || this.languageId, this.languageId),
         };
 
         console.log(`[ApiClient] Translating: "${text}" (lang: ${body.language_id})`);

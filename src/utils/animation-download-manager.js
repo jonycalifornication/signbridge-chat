@@ -5,6 +5,7 @@
  */
 
 import { getApiClient } from './api-client.js';
+import { getFoundAnimationCount } from './language-mode.js';
 
 /**
  * @typedef {Object} CachedAnimation
@@ -156,6 +157,49 @@ export class AnimationDownloadManager {
 
         const urls = await this.preloadSequence(response.sequence);
         return { response, urls };
+    }
+
+    /**
+     * Try languages in order and preload the first usable translation.
+     * If none has found animations, return the first successful response so
+     * callers can still fall back to finger spelling.
+     * @param {string} text
+     * @param {string[]} languageIds
+     * @returns {Promise<{response: Object, urls: Map<string, string>, languageId: string|null}>}
+     */
+    async translateAndPreloadAny(text, languageIds = []) {
+        const candidates = Array.isArray(languageIds) && languageIds.length > 0
+            ? languageIds
+            : [this.apiClient.languageId];
+        let firstSuccessful = null;
+        let lastError = null;
+
+        for (const languageId of candidates) {
+            try {
+                const result = await this.translateAndPreload(text, languageId);
+                const foundCount = getFoundAnimationCount(result.response);
+                const selectedLanguageId = result.response?.language_id || languageId;
+
+                if (!firstSuccessful) {
+                    firstSuccessful = { ...result, languageId: selectedLanguageId };
+                }
+
+                if (foundCount > 0) {
+                    console.log(`[DownloadManager] Selected language ${selectedLanguageId} (${foundCount} found)`);
+                    return { ...result, languageId: selectedLanguageId };
+                }
+            } catch (error) {
+                lastError = error;
+                console.warn(`[DownloadManager] Translation failed for language ${languageId}:`, error);
+            }
+        }
+
+        if (firstSuccessful) {
+            console.log(`[DownloadManager] No found animations in language chain, using ${firstSuccessful.languageId}`);
+            return firstSuccessful;
+        }
+
+        throw lastError || new Error('Translation failed for all configured languages');
     }
 
     /**

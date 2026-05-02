@@ -38,10 +38,21 @@ describe('Config Module', () => {
             expect(typeof CONFIG.defaultAvatar).toBe('string');
             expect(typeof CONFIG.avatars).toBe('object');
             expect(typeof CONFIG.animations).toBe('object');
+            expect(typeof CONFIG.languageId).toBe('string');
+            expect(typeof CONFIG.languageMode).toBe('string');
+            expect(Array.isArray(CONFIG.languagePriority)).toBe(true);
             expect(typeof CONFIG.camera).toBe('object');
             expect(typeof CONFIG.avatar).toBe('object');
             expect(typeof CONFIG.widget).toBe('object');
             expect(typeof CONFIG.lights).toBe('object');
+        });
+    });
+
+    describe('Language configuration', () => {
+        it('should have language defaults', () => {
+            expect(CONFIG.languageId).toBe('kz_KSL');
+            expect(CONFIG.languageMode).toBe('auto');
+            expect(CONFIG.languagePriority).toEqual(['kz_KSL', 'ru_RSL']);
         });
     });
 
