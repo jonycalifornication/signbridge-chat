@@ -28,16 +28,12 @@ const CHAR_TO_VISEME = {
     'v': 'ih', 'f': 'ih',
 
     // Dental/Alveolar (Teeth visible): S, Z, D, T, N, L, C -> ih
-    'с': 'ih', 'з': 'ih', 'д': 'ih', 'т': 'ih', 'ц': 'ih', 'ч': 'ih', 'щ': 'ih', 'н': 'ih',
-    's': 'ih', 'z': 'ih', 'd': 'ih', 't': 'ih', 'n': 'ih', 'c': 'ih',
+    'с': 'ih', 'з': 'ih', 'д': 'ih', 'т': 'ih', 'ц': 'ih', 'ч': 'ih', 'щ': 'ih', 'н': 'ih', 'л': 'ih',
+    's': 'ih', 'z': 'ih', 'd': 'ih', 't': 'ih', 'n': 'ih', 'c': 'ih', 'l': 'ih',
 
-    // L, R -> oh (Open but slightly different shape)
-    'л': 'oh', 'р': 'oh',
-    'l': 'oh', 'r': 'oh',
-
-    // Velar/Guttural: K, G, X -> ih (if tighter) works better and prevents bleeding into 'O'
-    'к': 'ih', 'г': 'ih', 'х': 'ih', 'ж': 'ih', 'ш': 'ih',
-    'k': 'ih', 'g': 'ih', 'x': 'ih', 'j': 'ih'
+    // R, Velar/Guttural: K, G, X -> ih (if tighter) works better and prevents bleeding into 'O'
+    'к': 'ih', 'г': 'ih', 'х': 'ih', 'ж': 'ih', 'ш': 'ih', 'р': 'ih',
+    'k': 'ih', 'g': 'ih', 'x': 'ih', 'j': 'ih', 'r': 'ih'
 };
 
 const VOWELS = new Set(['а', 'a', 'ә', 'я', 'и', 'й', 'ы', 'і', 'i', 'e', 'у', 'ұ', 'ү', 'ю', 'u', 'w', 'е', 'ё', 'э', 'о', 'ө', 'o']);
@@ -62,6 +58,11 @@ export function textToVisemeSequence(text, baseSpeed = 100) {
                 value: 0
             });
             currentTime += baseSpeed * 0.8;
+            continue;
+        }
+
+        // Ъ and Ь have no phonetic sound of their own, skip them for lip-sync
+        if (char === 'ъ' || char === 'ь') {
             continue;
         }
 
