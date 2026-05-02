@@ -52,7 +52,7 @@ describe('Config Module', () => {
         it('should have language defaults', () => {
             expect(CONFIG.languageId).toBe('kz_KSL');
             expect(CONFIG.languageMode).toBe('auto');
-            expect(CONFIG.languagePriority).toEqual(['kz_KSL', 'ru_RSL']);
+            expect(CONFIG.languagePriority).toEqual(['kz_KSL', 'ru-RSL']);
         });
     });
 

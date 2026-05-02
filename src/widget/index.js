@@ -14,7 +14,7 @@ const LANGUAGE_MODE_STORAGE_KEY = 'signbridge_widget_language_mode';
 const LANGUAGE_MODE_OPTIONS = [
     { value: 'auto', label: 'Auto', title: 'Авто' },
     { value: 'kz_KSL', label: 'ҚҚ', title: 'Қазақша' },
-    { value: 'ru_RSL', label: 'RU', title: 'Русский' },
+    { value: 'ru-RSL', label: 'RU', title: 'Русский' },
 ];
 
 /**
