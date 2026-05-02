@@ -39,7 +39,7 @@ const CHAR_TO_VISEME = {
     'k': 'ih', 'g': 'ih', 'x': 'ih', 'j': 'ih', 'r': 'ih'
 };
 
-const VOWELS = new Set(['а', 'a', 'ә', 'я', 'и', 'й', 'ы', 'і', 'i', 'e', 'у', 'ұ', 'ү', 'ю', 'u', 'w', 'е', 'ё', 'э', 'о', 'ө', 'o']);
+const VOWELS = new Set(['а', 'a', 'ә', 'я', 'и', 'ы', 'і', 'i', 'e', 'у', 'ұ', 'ү', 'ю', 'u', 'w', 'е', 'ё', 'э', 'о', 'ө', 'o']);
 
 /**
  * Generate a sequence of visemes from text.
