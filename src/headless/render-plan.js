@@ -1,4 +1,6 @@
 import { CONFIG } from '../config.js';
+import { expandDatesInText } from '../utils/date-glosses.js';
+import { expandNumbersInText } from '../utils/number-glosses.js';
 
 const LETTER_RE = /[0-9A-Za-z\u0400-\u04FF]/;
 const DEFAULT_FETCH_TIMEOUT_MS = 10000;
@@ -243,8 +245,12 @@ export function renderPlanToGlossPreview(plan) {
     };
 }
 
+export function normalizeRenderText(text) {
+    return expandNumbersInText(expandDatesInText(normalizeText(text), 'kk'));
+}
+
 export async function buildRenderPlan(text, options) {
-    const normalizedText = normalizeText(text);
+    const normalizedText = normalizeRenderText(text);
     const response = await translateText(normalizedText, options);
     const sequence = Array.isArray(response?.sequence) ? response.sequence : [];
     const resolveLetter = createLetterResolver(options);
