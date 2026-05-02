@@ -309,13 +309,24 @@ class MobileAvatarApp {
             const event = this.currentExpressionSequence[this.currentExpressionIndex];
             // Deactivate previous viseme
             if (this.currentActiveViseme) {
-                this.setExpression(this.currentActiveViseme.name, 0);
+                if (this.currentActiveViseme.name === 'ou_oh_combo') {
+                    this.setExpression('ou', 0);
+                    this.setExpression('oh', 0);
+                } else if (this.currentActiveViseme.name === 'aa_ee_combo') {
+                    this.setExpression('aa', 0);
+                    this.setExpression('ee', 0);
+                } else {
+                    this.setExpression(this.currentActiveViseme.name, 0);
+                }
             }
             
             // Hard reset all vowel visemes to 0 directly to prevent bleeding
             if (this.currentVrm?.expressionManager) {
+                let skipReset = [event.preset];
+                if (event.preset === 'ou_oh_combo') skipReset = ['ou', 'oh'];
+                if (event.preset === 'aa_ee_combo') skipReset = ['aa', 'ee'];
                 ['aa', 'ih', 'ou', 'ee', 'oh'].forEach(v => {
-                    if (v !== event.preset) {
+                    if (!skipReset.includes(v)) {
                         this.currentVrm.expressionManager.setValue(v, 0);
                         this.setExpression(v, 0);
                     }
@@ -323,7 +334,23 @@ class MobileAvatarApp {
             }
 
             // Activate new viseme
-            if (event.preset !== 'neutral') {
+            if (event.preset === 'ou_oh_combo') {
+                const val = event.value ?? 0.8;
+                this.setExpression('ou', val * 0.5);
+                this.setExpression('oh', val * 0.5);
+                this.currentActiveViseme = {
+                    name: 'ou_oh_combo',
+                    endTime: event.time + event.duration,
+                };
+            } else if (event.preset === 'aa_ee_combo') {
+                const val = event.value ?? 0.8;
+                this.setExpression('aa', val * 0.3);
+                this.setExpression('ee', val * 0.6);
+                this.currentActiveViseme = {
+                    name: 'aa_ee_combo',
+                    endTime: event.time + event.duration,
+                };
+            } else if (event.preset !== 'neutral') {
                 this.setExpression(event.preset, event.value ?? 0.8);
                 this.currentActiveViseme = {
                     name: event.preset,
@@ -337,7 +364,15 @@ class MobileAvatarApp {
 
         // Auto-expire active viseme
         if (this.currentActiveViseme && this.expressionTimer > this.currentActiveViseme.endTime) {
-            this.setExpression(this.currentActiveViseme.name, 0);
+            if (this.currentActiveViseme.name === 'ou_oh_combo') {
+                this.setExpression('ou', 0);
+                this.setExpression('oh', 0);
+            } else if (this.currentActiveViseme.name === 'aa_ee_combo') {
+                this.setExpression('aa', 0);
+                this.setExpression('ee', 0);
+            } else {
+                this.setExpression(this.currentActiveViseme.name, 0);
+            }
             this.currentActiveViseme = null;
         }
 

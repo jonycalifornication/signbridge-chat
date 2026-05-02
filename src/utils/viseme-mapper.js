@@ -12,11 +12,11 @@ const CHAR_TO_VISEME = {
     // U / У / Ұ / Ү / Ю -> ou
     'у': 'ou', 'ұ': 'ou', 'ү': 'ou', 'ю': 'ou', 'u': 'ou', 'w': 'ou',
 
-    // E / Е / Ё / Э -> ee
-    'е': 'ee', 'ё': 'ee', 'э': 'ee',
+    // E / Е / Ё / Э -> aa_ee_combo (30% aa, 60% ee)
+    'е': 'aa_ee_combo', 'ё': 'aa_ee_combo', 'э': 'aa_ee_combo',
 
-    // O / О / Ө -> oh
-    'о': 'oh', 'ө': 'oh', 'o': 'oh',
+    // O / О / Ө -> ou_oh_combo (50% ou, 50% oh)
+    'о': 'ou_oh_combo', 'ө': 'ou_oh_combo', 'o': 'ou_oh_combo',
 
     // Consonants mappings
     // M, B, P -> Neutral (Closed Lips) to simulate closure before/after vowels

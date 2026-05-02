@@ -926,7 +926,15 @@ export class AvatarWidget {
 
         if (this.currentActiveViseme) {
             if (this.expressionTimer > this.currentActiveViseme.endTime) {
-                this.setExpression(this.currentActiveViseme.name, 0);
+                if (this.currentActiveViseme.name === 'ou_oh_combo') {
+                    this.setExpression('ou', 0);
+                    this.setExpression('oh', 0);
+                } else if (this.currentActiveViseme.name === 'aa_ee_combo') {
+                    this.setExpression('aa', 0);
+                    this.setExpression('ee', 0);
+                } else {
+                    this.setExpression(this.currentActiveViseme.name, 0);
+                }
                 this.currentActiveViseme = null;
             }
         }
@@ -953,21 +961,47 @@ export class AvatarWidget {
 
         if (event.type === 'viseme') {
             if (this.currentActiveViseme) {
-                this.setExpression(this.currentActiveViseme.name, 0);
+                if (this.currentActiveViseme.name === 'ou_oh_combo') {
+                    this.setExpression('ou', 0);
+                    this.setExpression('oh', 0);
+                } else if (this.currentActiveViseme.name === 'aa_ee_combo') {
+                    this.setExpression('aa', 0);
+                    this.setExpression('ee', 0);
+                } else {
+                    this.setExpression(this.currentActiveViseme.name, 0);
+                }
             }
             
             // Hard reset all vowel visemes to 0 directly to prevent bleeding
             // ('aa' might override 'oh' if not explicitly reset)
             if (this.currentVrm.expressionManager) {
+                let skipReset = [event.name];
+                if (event.name === 'ou_oh_combo') skipReset = ['ou', 'oh'];
+                if (event.name === 'aa_ee_combo') skipReset = ['aa', 'ee'];
+                
                 ['aa', 'ih', 'ou', 'ee', 'oh'].forEach(v => {
-                    if (v !== event.name) {
+                    if (!skipReset.includes(v)) {
                         this.currentVrm.expressionManager.setValue(v, 0);
                         this.setExpression(v, 0);
                     }
                 });
             }
 
-            if (event.name !== 'neutral') {
+            if (event.name === 'ou_oh_combo') {
+                this.setExpression('ou', event.value * 0.5);
+                this.setExpression('oh', event.value * 0.5);
+                this.currentActiveViseme = {
+                    name: 'ou_oh_combo',
+                    endTime: event.time + event.duration
+                };
+            } else if (event.name === 'aa_ee_combo') {
+                this.setExpression('aa', event.value * 0.3);
+                this.setExpression('ee', event.value * 0.6);
+                this.currentActiveViseme = {
+                    name: 'aa_ee_combo',
+                    endTime: event.time + event.duration
+                };
+            } else if (event.name !== 'neutral') {
                 this.setExpression(event.name, event.value);
                 this.currentActiveViseme = {
                     name: event.name,
