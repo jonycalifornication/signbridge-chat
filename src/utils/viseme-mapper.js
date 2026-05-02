@@ -10,11 +10,11 @@ const CHAR_TO_VISEME = {
     'и': 'ih', 'й': 'ih', 'ы': 'ih', 'і': 'ih', 'i': 'ih', 'e': 'ih', 'y': 'ih',
 
     // U / У / Ұ / Ү / Ю -> ou
-    'у': 'ou', 'ұ': 'ou', 'ү': 'ou', 'ю': 'ou', 'u': 'ou', 'w': 'ou',
+    'у': 'ou', 'ұ': 'ou', 'ү': 'ou_oh_combo', 'ю': 'ou', 'u': 'ou', 'w': 'ou',
 
     // E / Е / Ё -> aa_ee_combo (30% aa, 60% ee)
-    'е': 'aa_ee_combo', 'ё': 'aa_ee_combo',
-    
+    'е': 'aa_ee_combo', 'ё': 'ou_oh_combo',
+
     // Э -> eh_combo (60% aa, 60% ee)
     'э': 'eh_combo',
 
