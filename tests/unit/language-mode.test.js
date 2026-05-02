@@ -11,20 +11,23 @@ import {
 
 describe('language mode utilities', () => {
     it('normalizes known language aliases', () => {
-        expect(normalizeLanguageId('ru')).toBe('ru_RSL');
+        expect(normalizeLanguageId('ru')).toBe('ru-RSL');
         expect(normalizeLanguageId('kk')).toBe('kz_KSL');
         expect(normalizeLanguageId('kz')).toBe('kz_KSL');
+        expect(normalizeLanguageId('ru_RSL')).toBe('ru-RSL');
+        expect(normalizeLanguageId('ru-RSL')).toBe('ru-RSL');
     });
 
     it('parses language priority', () => {
-        expect(parseLanguagePriority('ru_RSL,kz_KSL')).toEqual(['ru_RSL', 'kz_KSL']);
-        expect(parseLanguagePriority(['kz', 'ru', 'ru_RSL'])).toEqual(['kz_KSL', 'ru_RSL']);
+        expect(parseLanguagePriority('ru_RSL,kz_KSL')).toEqual(['ru-RSL', 'kz_KSL']);
+        expect(parseLanguagePriority(['kz', 'ru', 'ru_RSL'])).toEqual(['kz_KSL', 'ru-RSL']);
     });
 
     it('builds candidates from mode', () => {
         expect(normalizeLanguageMode('auto')).toBe('auto');
-        expect(getLanguageIdsForMode('auto', ['ru_RSL', 'kz_KSL'])).toEqual(['ru_RSL', 'kz_KSL']);
+        expect(getLanguageIdsForMode('auto', ['ru_RSL', 'kz_KSL'])).toEqual(['ru-RSL', 'kz_KSL']);
         expect(getLanguageIdsForMode('kz_KSL', ['ru_RSL', 'kz_KSL'])).toEqual(['kz_KSL']);
+        expect(getLanguageIdsForMode('ru_RSL', ['kz_KSL'])).toEqual(['ru-RSL']);
     });
 
     it('counts found animations', () => {

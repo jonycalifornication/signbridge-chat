@@ -1,6 +1,6 @@
 export const AUTO_LANGUAGE_MODE = 'auto';
 export const DEFAULT_LANGUAGE_ID = 'kz_KSL';
-export const DEFAULT_LANGUAGE_PRIORITY = ['kz_KSL', 'ru_RSL'];
+export const DEFAULT_LANGUAGE_PRIORITY = ['kz_KSL', 'ru-RSL'];
 
 const LANGUAGE_ALIASES = {
     kk: 'kz_KSL',
@@ -8,10 +8,10 @@ const LANGUAGE_ALIASES = {
     kazakh: 'kz_KSL',
     kz_ksl: 'kz_KSL',
     'kz-ksl': 'kz_KSL',
-    ru: 'ru_RSL',
-    russian: 'ru_RSL',
-    ru_rsl: 'ru_RSL',
-    'ru-rsl': 'ru_RSL',
+    ru: 'ru-RSL',
+    russian: 'ru-RSL',
+    ru_rsl: 'ru-RSL',
+    'ru-rsl': 'ru-RSL',
 };
 
 export function normalizeLanguageId(value, fallback = DEFAULT_LANGUAGE_ID) {
