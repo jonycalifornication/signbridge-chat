@@ -1,8 +1,9 @@
 import { CONFIG } from '../config.js';
 import { expandDatesInText } from '../utils/date-glosses.js';
 import { normalizeNumericText } from '../utils/number-glosses.js';
+import { loadDictionary, textToGlosses, detectDictLang, isDictionaryLoaded } from '../utils/gloss-dictionary.js';
 
-const LETTER_RE = /[0-9A-Za-z\u0400-\u04FF]/;
+const LETTER_RE = /[0-9A-Za-z\u0400-\u04FF°]/;
 const DEFAULT_FETCH_TIMEOUT_MS = 10000;
 const DEFAULT_LANGUAGE_ID = CONFIG.languageId || 'kz_KSL';
 
@@ -142,7 +143,7 @@ async function makeDactylItem(word, resolveLetter) {
         original: word,
         spokenText: word,
         gloss: resolvedLetters
-            .map(letter => letter.found ? letter.gloss : letter.char)
+            .map(letter => (letter.found ? letter.gloss : letter.char).toUpperCase())
             .join(' '),
         letters: resolvedLetters,
         foundLetters,
@@ -233,7 +234,7 @@ export function renderPlanToGlossPreview(plan) {
         const kind = item.kind === 'animation' ? 'matched' : item.kind;
         return {
             original: item.original || item.spokenText || '',
-            gloss: item.gloss || item.original || '',
+            gloss: (item.gloss || item.original || '').toUpperCase(),
             kind,
             matched: kind === 'matched' || kind === 'dactyl',
         };
@@ -251,19 +252,49 @@ export function normalizeRenderText(text) {
 
 export async function buildRenderPlan(text, options) {
     const normalizedText = normalizeRenderText(text);
-    const response = await translateText(normalizedText, options);
+
+    // Pre-process through CSV dictionary: convert text to glosses before sending to /translate/
+    let glossText = normalizedText;
+    try {
+        const lang = detectDictLang(normalizedText);
+        // If no dictionary is loaded, or we need to switch language
+        if (getActiveLang() !== lang) {
+            // Only try to fetch if we are in a browser environment
+            if (typeof fetch === 'function') {
+                await loadDictionary(lang);
+            }
+        }
+        
+        if (isDictionaryLoaded() && getActiveLang() === lang) {
+            const csvResult = textToGlosses(normalizedText);
+            if (csvResult.glosses && csvResult.glosses !== normalizedText) {
+                console.log(`[RenderPlan] CSV pre-processed (${lang}): "${normalizedText}" → "${csvResult.glosses}"`);
+                glossText = csvResult.glosses;
+            }
+        }
+    } catch (csvErr) {
+        console.warn(`[RenderPlan] CSV pre-processing failed: ${csvErr.message}`);
+    }
+
+    const response = await translateText(glossText, options);
     const sequence = Array.isArray(response?.sequence) ? response.sequence : [];
     const resolveLetter = createLetterResolver(options);
     const items = [];
 
-    for (const item of sequence) {
-        const original = getItemText(item);
-        if (!original) continue;
+    if (sequence.length === 0 && glossText) {
+        // If API returned nothing, use dactyl for the entire glossed text
+        items.push(await makeDactylItem(glossText, resolveLetter));
+    } else {
+        for (const item of sequence) {
+            const original = getItemText(item);
+            if (!original) continue;
 
-        if (item?.found && item?.file_url) {
-            items.push(makeAnimationItem(item));
-        } else {
-            items.push(await makeDactylItem(original, resolveLetter));
+            if (item?.found && item?.file_url) {
+                items.push(makeAnimationItem(item));
+            } else {
+                // This 'original' is the word returned by API (which is our glossed word)
+                items.push(await makeDactylItem(original, resolveLetter));
+            }
         }
     }
 

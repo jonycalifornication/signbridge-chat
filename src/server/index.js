@@ -13,6 +13,7 @@ import {
     estimateRenderTimeoutMs,
     renderPlanToGlossPreview
 } from '../headless/render-plan.js';
+import { loadDictionaryFromText } from '../utils/gloss-dictionary.js';
 
 const execPromise = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -40,6 +41,19 @@ if (!fs.existsSync(SESSIONS_FILE)) {
 }
 
 const tasks = new Map();
+
+// Pre-load dictionaries from filesystem for server-side glossing
+try {
+    const EMERCOM_DIR = path.join(__dirname, '../../emercom');
+    const kkCsv = fs.readFileSync(path.join(EMERCOM_DIR, 'kazakh.csv'), 'utf8');
+    const ruCsv = fs.readFileSync(path.join(EMERCOM_DIR, 'russian.csv'), 'utf8');
+    
+    loadDictionaryFromText('kk', kkCsv);
+    loadDictionaryFromText('ru', ruCsv);
+    console.log('[Server] CSV Dictionaries pre-loaded successfully');
+} catch (dictErr) {
+    console.error('[Server] Failed to pre-load CSV dictionaries:', dictErr.message);
+}
 
 
 const MAX_CACHE_SIZE = 100 * 1024 * 1024; // 100 MB
