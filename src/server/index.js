@@ -90,7 +90,7 @@ function hasRendererGPU() {
 }
 
 function resolveEncoderMaxQueueSize(hasGPU) {
-    const fallback = hasGPU ? 144 : 30;
+    const fallback = hasGPU ? 256 : 30;
     const rawValue = process.env.RENDER_ENCODER_MAX_QUEUE_SIZE || process.env.ENCODER_MAX_QUEUE_SIZE;
     const parsed = Number.parseInt(rawValue, 10);
 

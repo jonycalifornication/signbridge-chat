@@ -128,7 +128,7 @@ class HeadlessRenderer extends AvatarWidget {
     }
 
     resolveEncoderMaxQueueSize(renderProfile) {
-        const fallback = renderProfile?.hasGPU ? 144 : 30;
+        const fallback = renderProfile?.hasGPU ? 256 : 30;
         const configured = Number.parseInt(renderProfile?.encoderMaxQueueSize, 10);
 
         if (!Number.isFinite(configured)) return fallback;
