@@ -127,6 +127,14 @@ class HeadlessRenderer extends AvatarWidget {
         }
     }
 
+    resolveEncoderMaxQueueSize(renderProfile) {
+        const fallback = renderProfile?.hasGPU ? 144 : 30;
+        const configured = Number.parseInt(renderProfile?.encoderMaxQueueSize, 10);
+
+        if (!Number.isFinite(configured)) return fallback;
+        return Math.max(1, Math.min(configured, 256));
+    }
+
     async renderToVideo(config) {
         const { glosses, avatar, background, renderPlan, renderProfile } = config;
         
@@ -221,7 +229,7 @@ class HeadlessRenderer extends AvatarWidget {
         let isEncoding = true;
         let frameCount = 0;
         const sleep = (ms) => new Promise(r => originalSetTimeout(r, ms));
-        const maxEncoderQueueSize = renderProfile?.hasGPU ? 12 : 4;
+        const maxEncoderQueueSize = this.resolveEncoderMaxQueueSize(renderProfile);
         console.log(`[Headless] Encoder backpressure queue limit: ${maxEncoderQueueSize}`);
 
         try {

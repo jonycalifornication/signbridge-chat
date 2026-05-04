@@ -89,6 +89,15 @@ function hasRendererGPU() {
     return fs.existsSync('/dev/nvidia0');
 }
 
+function resolveEncoderMaxQueueSize(hasGPU) {
+    const fallback = hasGPU ? 144 : 30;
+    const rawValue = process.env.RENDER_ENCODER_MAX_QUEUE_SIZE || process.env.ENCODER_MAX_QUEUE_SIZE;
+    const parsed = Number.parseInt(rawValue, 10);
+
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(1, Math.min(parsed, 256));
+}
+
 async function prepareRenderPlan(glosses, appUrl, hasGPU, onProgress = null) {
     const renderText = Array.isArray(glosses) ? glosses.join(' ') : String(glosses || '');
     let renderPlan = null;
@@ -218,6 +227,8 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
         
         const hasGPU = hasRendererGPU();
         console.log(`[Server] GPU mode: ${hasGPU ? 'NVIDIA (EGL)' : 'ANGLE SwiftShader (CPU)'}`);
+        const encoderMaxQueueSize = resolveEncoderMaxQueueSize(hasGPU);
+        console.log(`[Server] Encoder queue limit: ${encoderMaxQueueSize}`);
         const preparedPlan = planning.renderPlan || typeof planning.renderTimeoutMs === 'number'
             ? {
                 renderPlan: planning.renderPlan || null,
@@ -288,7 +299,7 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
             dataUrl = await Promise.race([
                 page.evaluate(async (config) => {
                     return await window.startHeadlessRender(config);
-                }, { glosses, avatar, background, renderPlan, renderProfile: { hasGPU } }),
+                }, { glosses, avatar, background, renderPlan, renderProfile: { hasGPU, encoderMaxQueueSize } }),
                 new Promise((_, reject) => {
                     renderTimer = setTimeout(
                         () => reject(new Error(`Render timeout: exceeded ${Math.round(renderTimeoutMs / 1000)} seconds`)),
