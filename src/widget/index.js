@@ -1252,8 +1252,78 @@ export class AvatarWidget {
             document.body.style.backgroundColor = originalBodyBg;
             this.renderer.setClearColor(originalClearColor, originalClearAlpha);
         }
-
         return blob;
+    }
+
+    /**
+     * Generate and get a download URL for a video of the signed text (Server-Side).
+     * @param {string} text - Text to sign
+     * @param {Object} [options] - Options (e.g. background color)
+     * @returns {Promise<string>} Resolves with the absolute URL to the generated video
+     */
+    async generateVideo(text, options = {}) {
+        if (!text) throw new Error("No text provided");
+        
+        // Всегда отправляем запросы на генерацию видео на GPU-сервер
+        const apiUrl = 'http://5.63.119.72:5173/api/v1';
+        const payload = { 
+            glosses: text, 
+            avatar: CONFIG.defaultAvatar,
+            ...options
+        };
+        
+        // 1. Queue generation
+        const res = await fetch(`${apiUrl}/video/generate-async`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        if (!res.ok) throw new Error('Failed to start video generation');
+        const data = await res.json();
+        
+        // If it's cached and immediately returned
+        if (data.status === 'completed' && data.downloadUrl) {
+            const baseUrl = apiUrl.startsWith('http') ? new URL(apiUrl).origin : window.location.origin;
+            return baseUrl + data.downloadUrl;
+        }
+
+        const taskId = data.taskId;
+        if (!taskId) throw new Error('No task ID returned');
+
+        // 2. Wait for completion via SSE
+        return new Promise((resolve, reject) => {
+            const eventSource = new EventSource(`${apiUrl}/video/status/${taskId}`);
+            
+            eventSource.onmessage = (event) => {
+                try {
+                    const statusData = JSON.parse(event.data);
+                    
+                    if (statusData.error) {
+                        eventSource.close();
+                        reject(new Error(statusData.error));
+                        return;
+                    }
+
+                    if (statusData.progress === 100 || statusData.status === 'completed') {
+                        eventSource.close();
+                        const baseUrl = apiUrl.startsWith('http') ? new URL(apiUrl).origin : window.location.origin;
+                        // Format the final absolute URL
+                        const finalUrl = statusData.downloadUrl.startsWith('http') 
+                            ? statusData.downloadUrl 
+                            : baseUrl + statusData.downloadUrl;
+                        resolve(finalUrl);
+                    }
+                } catch (e) {
+                    console.error('[Avatar] Error parsing SSE:', e);
+                }
+            };
+            
+            eventSource.onerror = (err) => {
+                eventSource.close();
+                reject(new Error("SSE connection lost during video generation"));
+            };
+        });
     }
 
     /** Handle window resize */

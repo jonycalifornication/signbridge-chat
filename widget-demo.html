@@ -316,19 +316,16 @@
                                 const useBg = document.getElementById('use-bg-opt').checked;
                                 const bgColor = useBg ? document.getElementById('bg-color-opt').value : null;
                                     
-                                const blob = await window.avatarWidget.exportVideo(textToPlay, {
-                                    hd: isHd,
+                                const url = await window.avatarWidget.generateVideo(textToPlay, {
                                     background: bgColor
                                 });
                                 
-                                const url = URL.createObjectURL(blob);
                                 const a = document.createElement('a');
                                 a.href = url;
                                 a.download = `avatar_sign.webm`;
                                 document.body.appendChild(a);
                                 a.click();
                                 document.body.removeChild(a);
-                                URL.revokeObjectURL(url);
                             } catch (err) {
                                 alert('Recording failed: ' + err.message);
                             } finally {

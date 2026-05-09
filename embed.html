@@ -48,7 +48,16 @@
         window.addEventListener('message', async (event) => {
             if (window.avatarWidget && event.data) {
                 try {
-                    if (event.data.type === 'TEXT_SELECTION') {
+                    if (event.data.type === 'GENERATE_VIDEO') {
+                        const selectedText = event.data.text;
+                        try {
+                            const videoUrl = await window.avatarWidget.generateVideo(selectedText);
+                            window.parent.postMessage({ type: 'VIDEO_GENERATED', url: videoUrl, text: selectedText }, '*');
+                        } catch (err) {
+                            window.parent.postMessage({ type: 'VIDEO_GENERATION_FAILED', error: err.message, text: selectedText }, '*');
+                        }
+                        return; // Prevent AVATAR_ANIMATION_DONE from firing
+                    } else if (event.data.type === 'TEXT_SELECTION') {
                         // Pass to the text selection handler logic manually 
                         // by temporarily overriding selection, or pulling out the logic
                         // Since we can't easily mock window.getSelection here, 
