@@ -98,14 +98,15 @@ function resolveEncoderMaxQueueSize(hasGPU) {
     return Math.max(1, Math.min(parsed, 256));
 }
 
-async function prepareRenderPlan(glosses, appUrl, hasGPU, onProgress = null) {
+async function prepareRenderPlan(glosses, appUrl, hasGPU, onProgress = null, mode = 'normal') {
     const renderText = Array.isArray(glosses) ? glosses.join(' ') : String(glosses || '');
     let renderPlan = null;
     let renderTimeoutMs = estimateFallbackTimeoutMs(renderText, { hasGPU });
 
     try {
         if (onProgress) onProgress(8, 'Строим план жестов...');
-        renderPlan = await buildRenderPlan(renderText, resolveRenderPlanApiConfig(appUrl));
+        const planOptions = { ...resolveRenderPlanApiConfig(appUrl), mode };
+        renderPlan = await buildRenderPlan(renderText, planOptions);
         renderTimeoutMs = estimateRenderTimeoutMs(renderPlan, { hasGPU });
         console.log(`[Server] Render plan ready: ${JSON.stringify(renderPlan.stats)}, timeout=${Math.round(renderTimeoutMs / 1000)}s`);
     } catch (planErr) {
@@ -236,7 +237,7 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                     ? planning.renderTimeoutMs
                     : estimateRenderTimeoutMs(planning.renderPlan, { hasGPU })
             }
-            : await prepareRenderPlan(glosses, appUrl, hasGPU, onProgress);
+            : await prepareRenderPlan(glosses, appUrl, hasGPU, onProgress, planning.mode || 'normal');
         const { renderPlan, renderTimeoutMs } = preparedPlan;
 
         browser = await puppeteer.launch({
@@ -359,7 +360,7 @@ app.post('/api/v1/video/generate', rateLimit, async (req, res) => {
 
         await renderSemaphore.acquire();
         acquired = true;
-        const result = await generateVideoCore(glosses, avatar, background, userAgent, null);
+        const result = await generateVideoCore(glosses, avatar, background, userAgent, null, { mode });
         const sendPath = result.sendWebM ? result.webmPath : result.mp4Path;
         const filename = result.sendWebM ? 'animation.webm' : 'animation.mp4';
 
@@ -388,7 +389,7 @@ app.post('/api/v1/video/generate', rateLimit, async (req, res) => {
  * Preview gloss availability without launching the video renderer.
  */
 app.post('/api/v1/video/preview', rateLimit, async (req, res) => {
-    const { glosses } = req.body;
+    const { glosses, mode } = req.body;
 
     if (!glosses || (!Array.isArray(glosses) && typeof glosses !== 'string')) {
         return res.status(400).json({ error: 'glosses missing or invalid' });
@@ -396,7 +397,8 @@ app.post('/api/v1/video/preview', rateLimit, async (req, res) => {
 
     try {
         const appUrl = process.env.APP_URL || 'http://localhost:5173';
-        const renderPlan = await buildRenderPlan(glosses, resolveRenderPlanApiConfig(appUrl));
+        const planOptions = { ...resolveRenderPlanApiConfig(appUrl), mode: mode || 'normal' };
+        const renderPlan = await buildRenderPlan(glosses, planOptions);
         const renderPreview = renderPlanToGlossPreview(renderPlan);
 
         if (!renderPreview || !Array.isArray(renderPreview.glossTokens)) {
@@ -460,7 +462,7 @@ app.post('/api/v1/video/generate-async', rateLimit, async (req, res) => {
 
     const appUrl = process.env.APP_URL || 'http://localhost:5173';
     const hasGPU = hasRendererGPU();
-    const { renderPlan, renderTimeoutMs } = await prepareRenderPlan(glosses, appUrl, hasGPU);
+    const { renderPlan, renderTimeoutMs } = await prepareRenderPlan(glosses, appUrl, hasGPU, null, mode);
     const renderPreview = renderPlan ? renderPlanToGlossPreview(renderPlan) : null;
 
     // Initialize task
@@ -527,7 +529,8 @@ app.post('/api/v1/video/generate-async', rateLimit, async (req, res) => {
 
             const result = await generateVideoCore(glosses, avatar, background, userAgent, onProgress, {
                 renderPlan: task.renderPlan,
-                renderTimeoutMs: task.renderTimeoutMs
+                renderTimeoutMs: task.renderTimeoutMs,
+                mode: mode
             });
             
             // Save to Cache for next time

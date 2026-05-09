@@ -250,30 +250,86 @@ export function normalizeRenderText(text) {
     return normalizeNumericText(expandDatesInText(normalizeText(text), 'kk'));
 }
 
+async function aiTextToGloss(text, langId) {
+    const aiUrl = 'http://94.131.83.85:8010/api/t2g/glossing';
+    const apiKey = 'sta_SjLaEdygAVPJ0YKDbpmm0EXxhJwim10JkOQ9eExkIPA';
+    
+    // Подстраиваем язык для AI API (ожидает 'kz', 'ru' и т.д.)
+    let glossLang = 'kz';
+    if (langId && langId.toLowerCase().startsWith('ru')) {
+        glossLang = 'ru';
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    try {
+        const response = await fetch(aiUrl, {
+            method: 'POST',
+            headers: {
+                'accept': 'application/json',
+                'X-API-Key': apiKey,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                text: text,
+                gloss_language: glossLang
+            }),
+            signal: controller.signal
+        });
+
+        if (!response.ok) {
+            throw new Error(`AI API failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data?.lemmas_text || text;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
 export async function buildRenderPlan(text, options) {
     const normalizedText = normalizeRenderText(text);
 
     // Pre-process through CSV dictionary: convert text to glosses before sending to /translate/
     let glossText = normalizedText;
-    try {
-        const lang = detectDictLang(normalizedText);
-        // If no dictionary is loaded, or we need to switch language
-        if (getActiveLang() !== lang) {
-            // Only try to fetch if we are in a browser environment
-            if (typeof fetch === 'function') {
-                await loadDictionary(lang);
+    
+    if (options.mode === 'normal') {
+        try {
+            console.log(`[RenderPlan] Mode is normal. Calling AI Glossing for: "${normalizedText}"`);
+            const aiGloss = await aiTextToGloss(normalizedText, options.languageId || DEFAULT_LANGUAGE_ID);
+            if (aiGloss && aiGloss.trim()) {
+                glossText = aiGloss;
+                console.log(`[RenderPlan] AI Glossing returned: "${glossText}"`);
             }
+        } catch (err) {
+            console.warn(`[RenderPlan] AI Glossing failed, falling back to CSV: ${err.message}`);
         }
-        
-        if (isDictionaryLoaded() && getActiveLang() === lang) {
-            const csvResult = textToGlosses(normalizedText);
-            if (csvResult.glosses && csvResult.glosses !== normalizedText) {
-                console.log(`[RenderPlan] CSV pre-processed (${lang}): "${normalizedText}" → "${csvResult.glosses}"`);
-                glossText = csvResult.glosses;
+    }
+
+    // Если ИИ не использовался или вернул тот же текст (или упал с ошибкой) - используем CSV
+    if (glossText === normalizedText) {
+        try {
+            const lang = detectDictLang(normalizedText);
+            // If no dictionary is loaded, or we need to switch language
+            if (getActiveLang() !== lang) {
+                // Only try to fetch if we are in a browser environment
+                if (typeof fetch === 'function') {
+                    await loadDictionary(lang);
+                }
             }
+            
+            if (isDictionaryLoaded() && getActiveLang() === lang) {
+                const csvResult = textToGlosses(normalizedText);
+                if (csvResult.glosses && csvResult.glosses !== normalizedText) {
+                    console.log(`[RenderPlan] CSV pre-processed (${lang}): "${normalizedText}" → "${csvResult.glosses}"`);
+                    glossText = csvResult.glosses;
+                }
+            }
+        } catch (csvErr) {
+            console.warn(`[RenderPlan] CSV pre-processing failed: ${csvErr.message}`);
         }
-    } catch (csvErr) {
-        console.warn(`[RenderPlan] CSV pre-processing failed: ${csvErr.message}`);
     }
 
     const response = await translateText(glossText, options);
