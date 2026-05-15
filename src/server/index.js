@@ -14,11 +14,12 @@ import {
     renderPlanToGlossPreview
 } from '../headless/render-plan.js';
 import { loadDictionaryFromText } from '../utils/gloss-dictionary.js';
+import { validateRequest, getAllKeys, createKey, deleteKey } from './api-keys.js';
 
 const execPromise = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const port = 3000;
+const port = 3003;
 
 app.use(cors());
 app.use(express.json({ limit: '100kb' }));
@@ -217,6 +218,17 @@ setInterval(() => {
 }, RATE_LIMIT_WINDOW);
 
 /**
+ * API Key Middleware
+ */
+async function apiKeyAuth(req, res, next) {
+    const isValid = await validateRequest(req);
+    if (!isValid) {
+        return res.status(401).json({ error: 'Unauthorized: Invalid or missing API Key/Domain' });
+    }
+    next();
+}
+
+/**
  * Core Video Generation Logic
  */
 async function generateVideoCore(glosses, avatar, background, userAgent, onProgress = null, planning = {}) {
@@ -338,7 +350,7 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
 /**
  * v1: Synchronous Backend Endpoint (Retro-compatibility)
  */
-app.post('/api/v1/video/generate', rateLimit, async (req, res) => {
+app.post('/api/v1/video/generate', rateLimit, apiKeyAuth, async (req, res) => {
     const { glosses, avatar, background, mode } = req.body;
 
     if (!glosses || (!Array.isArray(glosses) && typeof glosses !== 'string')) {
@@ -388,7 +400,7 @@ app.post('/api/v1/video/generate', rateLimit, async (req, res) => {
 /**
  * Preview gloss availability without launching the video renderer.
  */
-app.post('/api/v1/video/preview', rateLimit, async (req, res) => {
+app.post('/api/v1/video/preview', rateLimit, apiKeyAuth, async (req, res) => {
     const { glosses, mode } = req.body;
 
     if (!glosses || (!Array.isArray(glosses) && typeof glosses !== 'string')) {
@@ -417,7 +429,7 @@ app.post('/api/v1/video/preview', rateLimit, async (req, res) => {
 /**
  * v2: Asynchronous Task Creation
  */
-app.post('/api/v1/video/generate-async', rateLimit, async (req, res) => {
+app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res) => {
     const { glosses, avatar, background, mode, sessionId, msgId } = req.body;
 
     if (!glosses || (!Array.isArray(glosses) && typeof glosses !== 'string')) {
@@ -668,6 +680,103 @@ app.get('/api/v1/video/download/:taskId', (req, res) => {
 
     const filename = task.finalFilePath.endsWith('.webm') ? 'animation.webm' : 'animation.mp4';
     res.download(task.finalFilePath, filename);
+});
+
+/**
+ * API Keys Admin Panel Routes
+ */
+app.get('/admin/keys', async (req, res) => {
+    const keys = await getAllKeys();
+    
+    // Simple HTML UI for admin panel
+    const html = `
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <title>Управление API Ключами</title>
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f3f4f6; color: #1f2937; padding: 40px; }
+            .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+            h1 { margin-top: 0; color: #111827; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { text-align: left; padding: 12px; border-bottom: 1px solid #e5e7eb; }
+            th { background: #f9fafb; font-weight: 600; }
+            .badge { background: #e0e7ff; color: #4f46e5; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-family: monospace; }
+            .btn { background: #4f46e5; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; text-decoration: none; display: inline-block; }
+            .btn-danger { background: #ef4444; }
+            .form-group { margin-bottom: 20px; display: flex; gap: 10px; }
+            input[type="text"] { flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Управление API Ключами</h1>
+            <p>Укажите домен сайта (например, <code>example.kz</code>). Для всех доменов используйте <code>*</code>.</p>
+            
+            <form id="createForm" class="form-group" onsubmit="createKey(event)">
+                <input type="text" id="domain" placeholder="Домен (например: example.kz)" required>
+                <button type="submit" class="btn">Сгенерировать ключ</button>
+            </form>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Домен (Origin/Referer)</th>
+                        <th>API Ключ</th>
+                        <th>Создан</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${keys.map(k => `
+                        <tr>
+                            <td><strong>${k.domain}</strong></td>
+                            <td><span class="badge">${k.apiKey}</span></td>
+                            <td>${new Date(k.createdAt).toLocaleDateString()}</td>
+                            <td><button onclick="deleteKey('${k.id}')" class="btn btn-danger">Удалить</button></td>
+                        </tr>
+                    `).join('')}
+                    ${keys.length === 0 ? '<tr><td colspan="4" style="text-align:center; color:#6b7280;">Ключей пока нет</td></tr>' : ''}
+                </tbody>
+            </table>
+        </div>
+
+        <script>
+            async function createKey(e) {
+                e.preventDefault();
+                const domain = document.getElementById('domain').value;
+                const res = await fetch('/admin/api/keys', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ domain })
+                });
+                if (res.ok) window.location.reload();
+                else alert('Ошибка при создании ключа');
+            }
+
+            async function deleteKey(id) {
+                if (!confirm('Точно удалить ключ? Виджет на этом домене перестанет работать.')) return;
+                const res = await fetch('/admin/api/keys/' + id, { method: 'DELETE' });
+                if (res.ok) window.location.reload();
+                else alert('Ошибка при удалении');
+            }
+        </script>
+    </body>
+    </html>`;
+    
+    res.send(html);
+});
+
+app.post('/admin/api/keys', async (req, res) => {
+    const key = await createKey(req.body.domain);
+    res.json(key);
+});
+
+app.delete('/admin/api/keys/:id', async (req, res) => {
+    const success = await deleteKey(req.params.id);
+    if (success) res.json({ success: true });
+    else res.status(404).json({ error: 'Key not found' });
 });
 
 /**

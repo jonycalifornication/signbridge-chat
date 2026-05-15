@@ -6,3 +6,4 @@ dist
 sessions.json
 temp_videos/
 video_cache/
+api_keys.json

@@ -12,7 +12,7 @@ services:
       # Backend URL for API proxy (signBridgeStorage)
       - BACKEND_URL=${BACKEND_URL:-http://94.131.83.85:8000}
       # Internal URL for video renderer
-      - RENDERER_URL=http://avatar-renderer:3000
+      - RENDERER_URL=http://avatar-renderer:3003
 
     # ✅ Нужно для Linux-сервера, чтобы host.docker.internal резолвился
     extra_hosts:
@@ -24,6 +24,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.renderer
+    ports:
+      - "3003:3003"
     environment:
       # URL where renderer can reach the static files
       - APP_URL=http://avatar-widget:80
@@ -35,4 +37,5 @@ services:
       - ./sessions.json:/app/sessions.json
       - ./video_cache:/app/video_cache
       - ./temp_videos:/app/temp_videos
+      - ./api_keys.json:/app/api_keys.json
     restart: always

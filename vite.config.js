@@ -46,7 +46,13 @@ export default defineConfig({
     proxy: {
       // Proxy all v1 API requests (video and sessions) to the renderer service
       '/api/v1': {
-        target: process.env.RENDERER_URL || 'http://avatar-renderer:3000',
+        target: process.env.RENDERER_URL || 'http://avatar-renderer:3003',
+        changeOrigin: true,
+      },
+
+      // Proxy admin panel to the renderer service
+      '/admin': {
+        target: process.env.RENDERER_URL || 'http://avatar-renderer:3003',
         changeOrigin: true,
       },
 

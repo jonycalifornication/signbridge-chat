@@ -77,7 +77,7 @@ export const CONFIG = Object.freeze({
 
     // API settings (configured via .env / Vite env vars)
     apiUrl: normalizeApiUrl(readEnv('VITE_API_URL', '/api/v1')),
-    apiKey: readEnv('VITE_API_KEY', ''), // X-API-Key for signBridgeStorage translate endpoint
+    apiKey: readSetting('apiKey', 'VITE_API_KEY', ''), // X-API-Key for signBridgeStorage translate endpoint and video generation
     languageId: normalizeLanguageId(readSetting('languageId', 'VITE_LANGUAGE_ID', DEFAULT_LANGUAGE_ID)),
     languageMode: normalizeLanguageMode(readSetting('languageMode', 'VITE_LANGUAGE_MODE', AUTO_LANGUAGE_MODE)),
     languagePriority: parseLanguagePriority(

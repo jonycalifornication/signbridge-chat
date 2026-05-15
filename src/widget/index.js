@@ -97,9 +97,12 @@ export class AvatarWidget {
         const avatar = options.avatar || this.currentAvatarName || CONFIG.defaultAvatar;
         const background = options.background || 'green';
 
+        const headers = { 'Content-Type': 'application/json' };
+        if (CONFIG.apiKey) headers['X-API-Key'] = CONFIG.apiKey;
+
         const response = await fetch('/api/v1/video/generate', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify({ glosses, avatar, background })
         });
 
@@ -1272,10 +1275,13 @@ export class AvatarWidget {
             ...options
         };
         
+        const headers = { 'Content-Type': 'application/json' };
+        if (CONFIG.apiKey) headers['X-API-Key'] = CONFIG.apiKey;
+
         // 1. Queue generation
         const res = await fetch(`${apiUrl}/video/generate-async`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify(payload)
         });
         

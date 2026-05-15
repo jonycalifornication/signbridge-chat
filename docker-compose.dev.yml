@@ -13,7 +13,7 @@ services:
     environment:
       - VITE_API_KEY=sbk_XUQqK17Ui7Gqqe9myqm0S0HGfL52rUWv01KiQMg56S0
       - VITE_API_URL=http://94.131.83.85:8000/api/v1
-      - RENDERER_URL=http://avatar-renderer:3000
+      - RENDERER_URL=http://avatar-renderer:3003
     command: >
       sh -c "npm install && npm run dev -- --host"
 
@@ -21,8 +21,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.renderer
-#    ports:
-#      - "3000:3000"
+    ports:
+      - "3003:3003"
 
     environment:
       - APP_URL=http://avatar-widget:5173
@@ -32,3 +32,4 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
+      - ./api_keys.json:/app/api_keys.json
