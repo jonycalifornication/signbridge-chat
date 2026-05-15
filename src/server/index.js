@@ -746,20 +746,34 @@ app.get('/admin/keys', async (req, res) => {
             async function createKey(e) {
                 e.preventDefault();
                 const domain = document.getElementById('domain').value;
-                const res = await fetch('/admin/api/keys', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ domain })
-                });
-                if (res.ok) window.location.reload();
-                else alert('Ошибка при создании ключа');
+                try {
+                    const res = await fetch('/admin/api/keys', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ domain })
+                    });
+                    if (res.ok) window.location.reload();
+                    else {
+                        const text = await res.text();
+                        alert('Ошибка ' + res.status + ': ' + text);
+                    }
+                } catch (err) {
+                    alert('Сетевая ошибка: ' + err.message);
+                }
             }
 
             async function deleteKey(id) {
                 if (!confirm('Точно удалить ключ? Виджет на этом домене перестанет работать.')) return;
-                const res = await fetch('/admin/api/keys/' + id, { method: 'DELETE' });
-                if (res.ok) window.location.reload();
-                else alert('Ошибка при удалении');
+                try {
+                    const res = await fetch('/admin/api/keys/' + id, { method: 'DELETE' });
+                    if (res.ok) window.location.reload();
+                    else {
+                        const text = await res.text();
+                        alert('Ошибка ' + res.status + ': ' + text);
+                    }
+                } catch (err) {
+                    alert('Сетевая ошибка: ' + err.message);
+                }
             }
         </script>
     </body>
