@@ -9,17 +9,22 @@ const API_KEYS_FILE = path.join(__dirname, '../../api_keys.json');
 console.log('[API Keys] Storage file path:', API_KEYS_FILE);
 
 // Initialize DB file if not exists
-if (!fs.existsSync(API_KEYS_FILE)) {
-    console.log('[API Keys] File does not exist, creating empty array...');
-    fs.writeFileSync(API_KEYS_FILE, JSON.stringify([]));
-} else {
-    const stat = fs.statSync(API_KEYS_FILE);
-    console.log('[API Keys] File exists. isFile:', stat.isFile(), 'isDirectory:', stat.isDirectory(), 'size:', stat.size);
-    if (stat.isDirectory()) {
-        console.error('[API Keys] CRITICAL: api_keys.json is a DIRECTORY, not a file! Removing and recreating...');
-        fs.rmdirSync(API_KEYS_FILE);
+try {
+    if (!fs.existsSync(API_KEYS_FILE)) {
+        console.log('[API Keys] File does not exist, creating empty array...');
         fs.writeFileSync(API_KEYS_FILE, JSON.stringify([]));
+    } else {
+        const stat = fs.statSync(API_KEYS_FILE);
+        if (stat.isDirectory()) {
+            console.error('[API Keys] CRITICAL: api_keys.json is a DIRECTORY, not a file!');
+            console.error('[API Keys] Fix: on the server run: rm -rf api_keys.json && echo "[]" > api_keys.json');
+            console.error('[API Keys] Will use in-memory storage as fallback.');
+        } else {
+            console.log('[API Keys] File OK. size:', stat.size, 'bytes');
+        }
     }
+} catch (initErr) {
+    console.error('[API Keys] Init error:', initErr.message);
 }
 
 function generateApiKey() {
