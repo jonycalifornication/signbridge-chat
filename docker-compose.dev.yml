@@ -32,4 +32,4 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
-      - ./api_keys.json:/app/api_keys.json
+      - ./data:/app/data

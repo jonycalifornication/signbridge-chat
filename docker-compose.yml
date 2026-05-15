@@ -37,5 +37,5 @@ services:
       - ./sessions.json:/app/sessions.json
       - ./video_cache:/app/video_cache
       - ./temp_videos:/app/temp_videos
-      - ./api_keys.json:/app/api_keys.json
+      - ./data:/app/data
     restart: always

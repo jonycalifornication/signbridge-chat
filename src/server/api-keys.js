@@ -4,12 +4,17 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const API_KEYS_FILE = path.join(__dirname, '../../api_keys.json');
+const API_KEYS_FILE = path.join(__dirname, '../../data/api_keys.json');
 
 console.log('[API Keys] Storage file path:', API_KEYS_FILE);
 
 // Initialize DB file if not exists
 try {
+    const dataDir = path.dirname(API_KEYS_FILE);
+    if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+        console.log('[API Keys] Created data directory:', dataDir);
+    }
     if (!fs.existsSync(API_KEYS_FILE)) {
         console.log('[API Keys] File does not exist, creating empty array...');
         fs.writeFileSync(API_KEYS_FILE, JSON.stringify([]));
