@@ -769,14 +769,27 @@ app.get('/admin/keys', async (req, res) => {
 });
 
 app.post('/admin/api/keys', async (req, res) => {
-    const key = await createKey(req.body.domain);
-    res.json(key);
+    console.log('[Admin] POST /admin/api/keys called, body:', JSON.stringify(req.body));
+    try {
+        const key = await createKey(req.body.domain);
+        console.log('[Admin] Key created successfully:', key.id, 'for domain:', key.domain);
+        res.json(key);
+    } catch (err) {
+        console.error('[Admin] ERROR creating key:', err.message, err.stack);
+        res.status(500).json({ error: 'Failed to create key: ' + err.message });
+    }
 });
 
 app.delete('/admin/api/keys/:id', async (req, res) => {
-    const success = await deleteKey(req.params.id);
-    if (success) res.json({ success: true });
-    else res.status(404).json({ error: 'Key not found' });
+    console.log('[Admin] DELETE /admin/api/keys/' + req.params.id);
+    try {
+        const success = await deleteKey(req.params.id);
+        if (success) res.json({ success: true });
+        else res.status(404).json({ error: 'Key not found' });
+    } catch (err) {
+        console.error('[Admin] ERROR deleting key:', err.message, err.stack);
+        res.status(500).json({ error: 'Failed to delete key: ' + err.message });
+    }
 });
 
 /**

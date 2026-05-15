@@ -6,9 +6,20 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const API_KEYS_FILE = path.join(__dirname, '../../api_keys.json');
 
+console.log('[API Keys] Storage file path:', API_KEYS_FILE);
+
 // Initialize DB file if not exists
 if (!fs.existsSync(API_KEYS_FILE)) {
+    console.log('[API Keys] File does not exist, creating empty array...');
     fs.writeFileSync(API_KEYS_FILE, JSON.stringify([]));
+} else {
+    const stat = fs.statSync(API_KEYS_FILE);
+    console.log('[API Keys] File exists. isFile:', stat.isFile(), 'isDirectory:', stat.isDirectory(), 'size:', stat.size);
+    if (stat.isDirectory()) {
+        console.error('[API Keys] CRITICAL: api_keys.json is a DIRECTORY, not a file! Removing and recreating...');
+        fs.rmdirSync(API_KEYS_FILE);
+        fs.writeFileSync(API_KEYS_FILE, JSON.stringify([]));
+    }
 }
 
 function generateApiKey() {
@@ -18,15 +29,19 @@ function generateApiKey() {
 export async function getAllKeys() {
     try {
         const data = await fs.promises.readFile(API_KEYS_FILE, 'utf8');
-        return JSON.parse(data);
+        const keys = JSON.parse(data);
+        console.log('[API Keys] Loaded', keys.length, 'keys from disk');
+        return keys;
     } catch (e) {
-        console.error('[API Keys] Read error:', e);
+        console.error('[API Keys] Read error:', e.message, e.code);
         return [];
     }
 }
 
 async function saveKeys(keys) {
+    console.log('[API Keys] Saving', keys.length, 'keys to', API_KEYS_FILE);
     await fs.promises.writeFile(API_KEYS_FILE, JSON.stringify(keys, null, 2));
+    console.log('[API Keys] Save successful');
 }
 
 export async function createKey(domain) {
