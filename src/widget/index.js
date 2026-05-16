@@ -803,12 +803,12 @@ export class AvatarWidget {
             // Setup crossfade: new action starts at 0 weight, old action fades out
             newAction.setEffectiveWeight(1.0);
             newAction.play();
-            newAction.crossFadeFrom(this.currentAction, duration, true);
+            newAction.crossFadeFrom(this.currentAction, duration, false);
         } else if (this.idleAction) {
             // If only idle is playing, crossfade from idle
             newAction.setEffectiveWeight(1.0);
             newAction.play();
-            newAction.crossFadeFrom(this.idleAction, duration, true);
+            newAction.crossFadeFrom(this.idleAction, duration, false);
         } else {
             // No previous action, just play
             newAction.setEffectiveWeight(1.0);
@@ -843,7 +843,7 @@ export class AvatarWidget {
             this.idleAction.play();
 
             if (this.currentAction && this.currentAction !== this.idleAction) {
-                this.idleAction.crossFadeFrom(this.currentAction, fadeDuration, true);
+                this.idleAction.crossFadeFrom(this.currentAction, fadeDuration, false);
             }
             
             this.currentAction = this.idleAction;
