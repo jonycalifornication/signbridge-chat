@@ -723,6 +723,7 @@ export class AvatarWidget {
         setRot('rightHand', 0.1, 0.2, 0);
     }
 
+
     /**
      * Set animation playback speed
      * @param {number} speed - Speed multiplier (1.0 = normal, 2.0 = double speed)
@@ -791,18 +792,29 @@ export class AvatarWidget {
         newAction.setEffectiveTimeScale(this.getPlaybackRate());
         newAction.setEffectiveTimeScale(this.playbackSpeed);
 
-        // Fade out idle action so it blends underneath the new action
-        if (this.idleAction) {
-            this.idleAction.fadeOut(ANIMATION_DEFAULTS.CROSSFADE_DURATION);
+        // Use optimized crossFadeFrom for smooth blending
+        // This is necessary because VRMA files often have T-poses or rest poses at frame 0.
+        // True inertial blending fails if frame 0 is not the actual start of the gesture.
+        
+        const duration = ANIMATION_DEFAULTS.CROSSFADE_DURATION || 0.25;
+
+        // If we have a current action, we crossfade FROM it to the new action
+        if (this.currentAction && this.currentAction !== newAction) {
+            // Setup crossfade: new action starts at 0 weight, old action fades out
+            newAction.setEffectiveWeight(1.0);
+            newAction.play();
+            newAction.crossFadeFrom(this.currentAction, duration, true);
+        } else if (this.idleAction) {
+            // If only idle is playing, crossfade from idle
+            newAction.setEffectiveWeight(1.0);
+            newAction.play();
+            newAction.crossFadeFrom(this.idleAction, duration, true);
+        } else {
+            // No previous action, just play
+            newAction.setEffectiveWeight(1.0);
+            newAction.play();
         }
 
-        // Fade out previous action (but NOT if it's the same action being replayed —
-        // mixer.clipAction() returns the same object for the same clip)
-        if (this.currentAction && this.currentAction !== this.idleAction && this.currentAction !== newAction) {
-            this.currentAction.fadeOut(ANIMATION_DEFAULTS.CROSSFADE_DURATION);
-        }
-
-        newAction.play();
         this.currentAction = newAction;
 
         // Wait for animation to finish — stays clamped at last frame
@@ -823,15 +835,18 @@ export class AvatarWidget {
      * Uses a long fade for natural-looking hand lowering.
      */
     returnToRestPose() {
-        const fadeDuration = ANIMATION_DEFAULTS.REST_POSE_FADE_DURATION;
-        if (this.currentAction && this.currentAction !== this.idleAction) {
-            this.currentAction.fadeOut(fadeDuration);
-        }
         if (this.idleAction) {
+            const fadeDuration = ANIMATION_DEFAULTS.REST_POSE_FADE_DURATION || 0.5;
+            
             this.idleAction.reset();
             this.idleAction.setEffectiveWeight(1.0);
-            this.idleAction.fadeIn(fadeDuration);
             this.idleAction.play();
+
+            if (this.currentAction && this.currentAction !== this.idleAction) {
+                this.idleAction.crossFadeFrom(this.currentAction, fadeDuration, true);
+            }
+            
+            this.currentAction = this.idleAction;
         }
     }
 
@@ -1355,7 +1370,9 @@ export class AvatarWidget {
         // DISABLED: User requested ONLY VRMA animations. Procedural override fights with animation.
         // this.setNeutralPose();
 
-        if (this.mixer) this.mixer.update(deltaTime);
+        if (this.mixer) {
+            this.mixer.update(deltaTime);
+        }
 
         this.updateBlinking(deltaTime);
         // this.updateBreathing(deltaTime); // DISABLED: Avoiding interference with VRMA
