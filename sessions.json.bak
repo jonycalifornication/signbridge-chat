@@ -1,0 +1,39 @@
+[
+  {
+    "id": "sess_0fbb-42fc-4806-a938-8ad1-mo68mviz",
+    "title": "Сәлем",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Сәлем",
+        "timestamp": 1776631692091
+      },
+      {
+        "role": "assistant",
+        "msgId": "msg_46c6-9f8c-4852-8d51-fb22-mo68mz5g",
+        "glosses": "Сәлем",
+        "taskId": null,
+        "bgColor": "white",
+        "avatar": "Aibek",
+        "mode": "normal",
+        "error": "Waiting failed: 30000ms exceeded",
+        "timestamp": 1776631692148
+      },
+      {
+        "role": "user",
+        "content": "Сәлем",
+        "timestamp": 1776632264125
+      },
+      {
+        "role": "assistant",
+        "msgId": "msg_1d9f-3902-41ec-9452-fb15-mo68z8j8",
+        "glosses": "Сәлем",
+        "taskId": "917c809c-f1a0-4b67-a0ea-5815c7777037",
+        "bgColor": "white",
+        "avatar": "Aibek",
+        "mode": "normal",
+        "timestamp": 1776632264180
+      }
+    ]
+  }
+]
