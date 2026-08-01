@@ -15,6 +15,9 @@ const i18n = {
         themeToggleLight: 'Күндізгі режим',
         langToggle: 'Қазақша',
         welcomeText: 'Кез келген тілде мәтін жазыңыз, 3D-аватар оны ым тіліне аударады.',
+        heroSrcA: 'сәлем', heroGlossA: 'СӘЛЕМ',
+        heroSrcB: 'достар', heroGlossB: 'ДОС',
+        heroCaption: 'Сөз — үстінде, ым — астында',
         inputPlaceholder: 'Фразаны енгізіңіз...',
         avatarSelect: 'Кейіпкерді таңдау',
         avatarName: 'Айназ',
@@ -69,6 +72,9 @@ const i18n = {
         themeToggleLight: 'Светлая тема',
         langToggle: 'Русский',
         welcomeText: 'Напишите текст на любом языке, и 3D-аватар переведет его на язык жестов.',
+        heroSrcA: 'привет', heroGlossA: 'ПРИВЕТ',
+        heroSrcB: 'друзья', heroGlossB: 'ДРУГ',
+        heroCaption: 'Слово сверху, жест снизу',
         inputPlaceholder: 'Введите фразу...',
         avatarSelect: 'Выбор персонажа',
         avatarName: 'Айназ',
@@ -936,8 +942,18 @@ function renderGlossPreview(bubble, tokens) {
             const original = tk.original || '';
             const gloss = tk.gloss || original;
             const status = getGlossTokenStatus(tk);
-            const title = original && original !== gloss ? `${status}: ${original}` : status;
-            return `<span class="gloss-token ${cls}" title="${escapeHtml(title)}">${escapeHtml(gloss)}</span>`;
+            // Interlinear notation, the way sign linguistics writes it: the source
+            // word sits above its gloss. The transformation ("достар" → "ДОС") is
+            // the whole point of this product, so it belongs on screen rather than
+            // hidden in a tooltip. The rule under the gloss carries the status, so
+            // colour is never the only cue.
+            const src = original && original.toLowerCase() !== gloss.toLowerCase()
+                ? `<span class="gloss-src">${escapeHtml(original)}</span>`
+                : '<span class="gloss-src">&nbsp;</span>';
+            return `<span class="gloss-token ${cls}" title="${escapeHtml(status)}">`
+                + src
+                + `<span class="gloss-out">${escapeHtml(gloss)}</span>`
+                + '</span>';
         }).join(' ');
     bubble.prepend(div);
 }
