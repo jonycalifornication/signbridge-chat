@@ -3,7 +3,7 @@
 Отправляешь текст — получаешь `.webm` с 3D-аватаром, который его показывает.
 Виджет подключать не нужно.
 
-**База:** `http://<сервер>:5173` — подставь свой адрес.
+**База:** `http://5.63.119.72:5173`
 
 ---
 
@@ -12,7 +12,7 @@
 Синхронный запрос: одно обращение, в ответ сразу файл.
 
 ```bash
-curl -X POST http://<сервер>:5173/api/v1/video/generate \
+curl -X POST http://5.63.119.72:5173/api/v1/video/generate \
   -H 'Content-Type: application/json' \
   -d '{"glosses":"сәлем достар","background":"green"}' \
   -o video.webm
@@ -109,7 +109,7 @@ Server-Sent Events. Форма события зависит от момента
 ### Пример целиком
 
 ```javascript
-const base = 'http://<сервер>:5173';
+const base = 'http://5.63.119.72:5173';
 
 const { taskId, glossPreview } = await fetch(`${base}/api/v1/video/generate-async`, {
     method: 'POST',
@@ -168,7 +168,7 @@ console.log('Готово:', videoUrl);
 включить, запрос будет выглядеть так:
 
 ```bash
-curl -X POST http://<сервер>:5173/api/v1/video/generate \
+curl -X POST http://5.63.119.72:5173/api/v1/video/generate \
   -H 'X-API-Key: <ключ>' \
   -H 'Content-Type: application/json' \
   -d '{"glosses":"сәлем"}'
