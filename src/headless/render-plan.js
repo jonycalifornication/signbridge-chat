@@ -198,7 +198,12 @@ export function normalizeRenderText(text) {
 export async function buildRenderPlan(text, options) {
     const normalizedText = normalizeRenderText(text);
 
-    const response = await translateText(normalizedText, options, { alreadyGlossed: false });
+    // The caller may have glossed the text itself (speech-to-avatar). Then the
+    // gateway must not gloss it again — a second pass would rewrite the glosses
+    // the caller's tokens/speeds are aligned to.
+    const response = await translateText(normalizedText, options, {
+        alreadyGlossed: options.alreadyGlossed === true,
+    });
     const sequence = Array.isArray(response?.sequence) ? response.sequence : [];
     
     const items = [];

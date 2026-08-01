@@ -161,14 +161,54 @@ const tasks = new Map();
 const MAX_CACHE_SIZE = 100 * 1024 * 1024; // 100 MB
 
 /**
- * Hash helper for caching
+ * Per-gloss playback data from a caller that already did its own glossing
+ * (the speech-to-avatar case).
+ *
+ *   tokens[i].word  — the original word behind gloss i. Hands sign the gloss,
+ *                     lips speak the word: "БАРУ" is signed, "барады" is spoken.
+ *   speeds[i]       — timeScale multiplier for animation i, so a gesture can be
+ *                     stretched or compressed to fit an external timeline.
+ *
+ * Both are positional and must line up with the sequence the backend returns.
+ * The avatar drops tokens entirely on a length mismatch (a desynchronised
+ * mouth is worse than a gloss-shaped one), so we check it here and say so
+ * instead of letting it fail quietly.
+ */
+function normalizePlaybackHints(body) {
+    const tokens = Array.isArray(body?.tokens)
+        ? body.tokens.map(t => ({
+            gloss: typeof t?.gloss === 'string' ? t.gloss : '',
+            word: typeof t?.word === 'string' ? t.word.trim() : '',
+        }))
+        : [];
+
+    const speeds = Array.isArray(body?.speeds)
+        ? body.speeds.map(v => {
+            const n = Number(v);
+            // Same bounds setPlaybackSpeed() clamps to in the avatar.
+            return Number.isFinite(n) && n > 0 ? Math.max(0.1, Math.min(n, 5)) : 1;
+        })
+        : [];
+
+    return { tokens, speeds, alreadyGlossed: body?.already_glossed === true };
+}
+
+/**
+ * Hash helper for caching.
+ *
+ * Playback hints are part of the identity of a video: the same glosses with
+ * different speeds or different spoken words are a different render, and
+ * leaving them out would serve a stale file.
  */
 function getCacheKey(config) {
     const str = JSON.stringify({
         glosses: config.glosses,
         avatar: config.avatar || 'Aibek',
         background: config.background || 'white',
-        mode: config.mode || 'normal'
+        mode: config.mode || 'normal',
+        alreadyGlossed: config.alreadyGlossed === true,
+        tokens: config.tokens?.length ? config.tokens.map(t => t.word) : null,
+        speeds: config.speeds?.length ? config.speeds : null,
     });
     return crypto.createHash('md5').update(str).digest('hex');
 }
@@ -202,14 +242,14 @@ function resolveEncoderMaxQueueSize(hasGPU) {
     return Math.max(1, Math.min(parsed, 256));
 }
 
-async function prepareRenderPlan(glosses, hasGPU, onProgress = null, mode = 'normal') {
+async function prepareRenderPlan(glosses, hasGPU, onProgress = null, mode = 'normal', alreadyGlossed = false) {
     const renderText = Array.isArray(glosses) ? glosses.join(' ') : String(glosses || '');
     let renderPlan = null;
     let renderTimeoutMs = estimateFallbackTimeoutMs(renderText, { hasGPU });
 
     try {
         if (onProgress) onProgress(8, 'Строим план жестов...');
-        const planOptions = { ...resolveRenderPlanApiConfig(), mode };
+        const planOptions = { ...resolveRenderPlanApiConfig(), mode, alreadyGlossed };
         renderPlan = await buildRenderPlan(renderText, planOptions);
         renderTimeoutMs = estimateRenderTimeoutMs(renderPlan, { hasGPU });
         console.log(`[Server] Render plan ready: ${JSON.stringify(renderPlan.stats)}, timeout=${Math.round(renderTimeoutMs / 1000)}s`);
@@ -385,7 +425,7 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                     ? planning.renderTimeoutMs
                     : estimateRenderTimeoutMs(planning.renderPlan, { hasGPU })
             }
-            : await prepareRenderPlan(glosses, hasGPU, onProgress, planning.mode || 'normal');
+            : await prepareRenderPlan(glosses, hasGPU, onProgress, planning.mode || 'normal', planning.alreadyGlossed === true);
         const { renderPlan, renderTimeoutMs } = preparedPlan;
 
         browser = await puppeteer.launch({
@@ -467,6 +507,10 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                     // response over so the page does not translate a second time.
                     translateResponse: renderPlan?.response || null,
                     languageId: renderPlan?.languageId || null,
+                    // Positional per-gloss data: lips speak tokens[i].word while the
+                    // hands sign the gloss; speeds[i] scales that gesture.
+                    tokens: planning.tokens || [],
+                    speeds: planning.speeds || [],
                     renderProfile: { hasGPU, encoderMaxQueueSize }
                 }),
                 new Promise((_, reject) => {
@@ -508,6 +552,7 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
  */
 app.post('/api/v1/video/generate', rateLimit, apiKeyAuth, async (req, res) => {
     const { glosses, avatar, background, mode } = req.body;
+    const hints = normalizePlaybackHints(req.body);
 
     if (!glosses || (!Array.isArray(glosses) && typeof glosses !== 'string')) {
         return res.status(400).json({ error: 'glosses missing' });
@@ -518,7 +563,7 @@ app.post('/api/v1/video/generate', rateLimit, apiKeyAuth, async (req, res) => {
 
     let acquired = false;
     try {
-        const cacheKey = getCacheKey({ glosses, avatar, background, mode });
+        const cacheKey = getCacheKey({ glosses, avatar, background, mode, ...hints });
         const cachePath = path.join(CACHE_DIR, `${cacheKey}.webm`);
         
         if (fs.existsSync(cachePath)) {
@@ -528,7 +573,7 @@ app.post('/api/v1/video/generate', rateLimit, apiKeyAuth, async (req, res) => {
 
         await renderSemaphore.acquire();
         acquired = true;
-        const result = await generateVideoCore(glosses, avatar, background, userAgent, null, { mode });
+        const result = await generateVideoCore(glosses, avatar, background, userAgent, null, { mode, ...hints });
         const sendPath = result.sendWebM ? result.webmPath : result.mp4Path;
         const filename = result.sendWebM ? 'animation.webm' : 'animation.mp4';
 
@@ -558,13 +603,14 @@ app.post('/api/v1/video/generate', rateLimit, apiKeyAuth, async (req, res) => {
  */
 app.post('/api/v1/video/preview', rateLimit, apiKeyAuth, async (req, res) => {
     const { glosses, mode } = req.body;
+    const hints = normalizePlaybackHints(req.body);
 
     if (!glosses || (!Array.isArray(glosses) && typeof glosses !== 'string')) {
         return res.status(400).json({ error: 'glosses missing or invalid' });
     }
 
     try {
-        const planOptions = { ...resolveRenderPlanApiConfig(), mode: mode || 'normal' };
+        const planOptions = { ...resolveRenderPlanApiConfig(), mode: mode || 'normal', alreadyGlossed: hints.alreadyGlossed };
         const renderPlan = await buildRenderPlan(glosses, planOptions);
         const renderPreview = renderPlanToGlossPreview(renderPlan);
 
@@ -586,6 +632,7 @@ app.post('/api/v1/video/preview', rateLimit, apiKeyAuth, async (req, res) => {
  */
 app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res) => {
     const { glosses, avatar, background, mode, sessionId, msgId } = req.body;
+    const hints = normalizePlaybackHints(req.body);
 
     if (!glosses || (!Array.isArray(glosses) && typeof glosses !== 'string')) {
         return res.status(400).json({ error: 'glosses missing or invalid' });
@@ -628,7 +675,20 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
     }
 
     const hasGPU = hasRendererGPU();
-    const { renderPlan, renderTimeoutMs } = await prepareRenderPlan(glosses, hasGPU, null, mode);
+    const { renderPlan, renderTimeoutMs } = await prepareRenderPlan(glosses, hasGPU, null, mode, hints.alreadyGlossed);
+
+    // tokens/speeds are positional: the avatar ignores tokens outright when the
+    // count differs from the sequence, so tell the caller rather than shipping a
+    // video whose mouth silently fell back to speaking glosses.
+    const sequenceLength = renderPlan?.response?.sequence?.length ?? null;
+    const hintWarnings = [];
+    if (hints.tokens.length && sequenceLength !== null && hints.tokens.length !== sequenceLength) {
+        hintWarnings.push(`tokens: got ${hints.tokens.length} for ${sequenceLength} glosses — ignored, lips will speak the glosses`);
+    }
+    if (hints.speeds.length && sequenceLength !== null && hints.speeds.length !== sequenceLength) {
+        hintWarnings.push(`speeds: got ${hints.speeds.length} for ${sequenceLength} glosses — missing entries default to 1`);
+    }
+    if (hintWarnings.length) console.warn(`[Server] Playback hints mismatch — ${hintWarnings.join('; ')}`);
     const renderPreview = renderPlan ? renderPlanToGlossPreview(renderPlan) : null;
 
     // Initialize task
@@ -646,7 +706,12 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
     });
 
 
-    res.json({ taskId, status: 'queued', ...(renderPreview || {}) });
+    res.json({
+        taskId,
+        status: 'queued',
+        ...(renderPreview || {}),
+        ...(hintWarnings.length ? { warnings: hintWarnings } : {}),
+    });
 
     // Background processing
     (async () => {
@@ -663,7 +728,7 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
 
         try {
             // --- Caching Layer ---
-            const cacheKey = getCacheKey({ glosses, avatar, background, mode });
+            const cacheKey = getCacheKey({ glosses, avatar, background, mode, ...hints });
             const cachePath = path.join(CACHE_DIR, `${cacheKey}.webm`);
             
             if (fs.existsSync(cachePath)) {
@@ -696,7 +761,8 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
             const result = await generateVideoCore(glosses, avatar, background, userAgent, onProgress, {
                 renderPlan: task.renderPlan,
                 renderTimeoutMs: task.renderTimeoutMs,
-                mode: mode
+                mode: mode,
+                ...hints
             });
             
             // Save to Cache for next time

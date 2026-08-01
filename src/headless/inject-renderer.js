@@ -382,9 +382,17 @@
 
             // 5. Hand playback to the avatar. It owns glosses, glued clips,
             //    per-gloss speed, lip-sync and finger-spelling; we only record.
+            //
+            //    speeds[i] scales gesture i (and, with it, its lip timing and the
+            //    pause after it). tokens[i].word is the original word behind the
+            //    gloss, so the hands sign "БАРУ" while the lips say "барады".
+            //    Both are positional; the avatar ignores tokens if the count does
+            //    not match the sequence, which the server checks and reports.
             const languageId = (renderPlan && renderPlan.languageId) || config.languageId || undefined;
+            const speeds = Array.isArray(config.speeds) ? config.speeds : [];
+            const tokens = Array.isArray(config.tokens) ? config.tokens : [];
             if (response) {
-                await widget.playTranslateResponse(response, preloadedUrls, languageId);
+                await widget.playTranslateResponse(response, preloadedUrls, languageId, speeds, tokens);
             } else {
                 console.warn('[Headless] Nothing to play from the API — speaking the raw text.');
                 await widget.processTextSelection(text);
