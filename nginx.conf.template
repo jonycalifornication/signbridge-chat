@@ -39,26 +39,14 @@ server {
     proxy_set_header X-Forwarded-Proto $scheme;
   }
 
-  # --- Everything else under /api/ goes to the backend (translate, files, animations) ---
-  location /api/ {
-    proxy_pass ${BACKEND_URL};
-    proxy_http_version 1.1;
+  # No browser-facing proxy to the avatar or the storage backend: the video
+  # generator UI only calls our own renderer. Translate/file traffic is issued
+  # server-side (render plan) or inside the render page, which is served by the
+  # renderer itself — so nothing avatar-related is reachable from the internet
+  # through this vhost.
 
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
-
-  # --- Admin panel (API Keys management) ---
-  location /admin/ {
-    proxy_pass ${RENDERER_URL};
-    proxy_http_version 1.1;
-
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
+  # Админка (ключи + управление зеркалом аватара) наружу НЕ выставляется.
+  # Доступ только с самого сервера: ssh -L 3003:127.0.0.1:3003 и открыть
+  # http://localhost:3003/admin/keys
 
 }

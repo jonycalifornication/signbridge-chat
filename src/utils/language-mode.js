@@ -1,17 +1,27 @@
 export const AUTO_LANGUAGE_MODE = 'auto';
-export const DEFAULT_LANGUAGE_ID = 'kz_KSL';
-export const DEFAULT_LANGUAGE_PRIORITY = ['kz_KSL', 'ru-RSL'];
+
+/**
+ * These must be the codes the storage backend actually uses — it returns KSL,
+ * RSL and ASl from /cms/languages. Sending anything else (the old `kz_KSL`)
+ * makes /translate/ find nothing at all, so every word silently degrades to
+ * finger-spelling. The avatar project made the same move; this keeps the two in
+ * step.
+ */
+export const DEFAULT_LANGUAGE_ID = 'KSL';
+export const DEFAULT_LANGUAGE_PRIORITY = ['KSL', 'RSL'];
 
 const LANGUAGE_ALIASES = {
-    kk: 'kz_KSL',
-    kz: 'kz_KSL',
-    kazakh: 'kz_KSL',
-    kz_ksl: 'kz_KSL',
-    'kz-ksl': 'kz_KSL',
-    ru: 'ru-RSL',
-    russian: 'ru-RSL',
-    ru_rsl: 'ru-RSL',
-    'ru-rsl': 'ru-RSL',
+    kk: 'KSL',
+    kz: 'KSL',
+    kazakh: 'KSL',
+    ksl: 'KSL',
+    kz_ksl: 'KSL',
+    'kz-ksl': 'KSL',
+    ru: 'RSL',
+    russian: 'RSL',
+    rsl: 'RSL',
+    ru_rsl: 'RSL',
+    'ru-rsl': 'RSL',
 };
 
 export function normalizeLanguageId(value, fallback = DEFAULT_LANGUAGE_ID) {

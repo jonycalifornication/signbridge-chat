@@ -85,11 +85,8 @@ export const CONFIG = Object.freeze({
         DEFAULT_LANGUAGE_PRIORITY
     ),
 
-    // Telegram Error Logging config
-    telegram: {
-        botToken: readEnv('VITE_TG_BOT_TOKEN', '8723076091:AAGpkQwerwh_lubAJKO7C8IZdCUM6PkQneY'),
-        chatId: readEnv('VITE_TG_CHAT_ID', '-5133993969')
-    },
+    // Telegram error logging lived in the widget copy that this project no
+    // longer ships. Nothing reads it — the bot token went with it.
 
     /** @type {Object.<string, string|Object>} */
     avatars: {

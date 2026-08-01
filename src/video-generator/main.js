@@ -1,4 +1,3 @@
-import { loadDictionary, textToGlosses, detectDictLang } from './emercom-glosser.js';
 
 console.log('🚀 SignBridge Loading System Components...');
 
@@ -11,7 +10,6 @@ const i18n = {
         backLink: 'Панельге',
         newChat: 'Жаңа аударма',
         modeNormal: 'Қарапайым',
-        modeEmercom: 'ТЖД',
         modePreview: 'Тексеру',
         themeToggle: 'Түнгі режим',
         themeToggleLight: 'Күндізгі режим',
@@ -66,7 +64,6 @@ const i18n = {
         backLink: 'В панель',
         newChat: 'Новый перевод',
         modeNormal: 'Обычный',
-        modeEmercom: 'МЧС',
         modePreview: 'Проверка',
         themeToggle: 'Тёмная тема',
         themeToggleLight: 'Светлая тема',
@@ -203,7 +200,7 @@ let sessions = []; // Will be loaded from server
 let currentSessionId = null;
 let selectedBgColor = 'white';
 let selectedAvatar = 'Aibek'; // Internal name for backend
-let currentMode = 'normal'; // 'normal' | 'emercom' | 'preview'
+let currentMode = 'normal'; // 'normal' | 'preview'
 
 const MAX_TEXT_LENGTH = 500;
 
@@ -425,7 +422,7 @@ colorOptions.forEach(btn => {
     });
 });
 
-// Mode toggle (normal / emercom / preview)
+// Mode toggle (normal / preview)
 if (modeToggle) {
     modeToggle.querySelectorAll('.mode-toggle-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -433,10 +430,6 @@ if (modeToggle) {
             modeToggle.querySelectorAll('.mode-toggle-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             console.log(`[Mode] Switched to: ${currentMode}`);
-            if (currentMode === 'emercom') {
-                loadDictionary('ru').catch(e => console.warn('[Emercom] Preload ru failed:', e));
-                loadDictionary('kk').catch(e => console.warn('[Emercom] Preload kk failed:', e));
-            }
         });
     });
 }
@@ -815,8 +808,6 @@ function appendAssistantMessageToDOM(msgData) {
         renderGlossPreview(bubble, msgData.glossTokens);
     } else if (msgData.glossPreview) {
         renderGlossPreviewSimple(bubble, msgData.glossPreview);
-    } else if (msgData.mode === 'emercom' && msgData.glosses) {
-        renderGlossPreviewSimple(bubble, msgData.glosses);
     }
 
     if (msgData.videoUrl) {
@@ -1147,19 +1138,11 @@ async function triggerGenerate() {
     SoundFX.playPop();
     bumpUnread();
 
-    // Convert text to CSV glosses for every video-generator mode.
-    // Colors still come only from the server render-plan, not from CSV matches.
-    let glossText = text;
-    let glossPreview = null;
-    try {
-        const lang = detectDictLang(text);
-        await loadDictionary(lang);
-        const result = textToGlosses(text);
-        glossText = result.glosses;
-        glossPreview = result.glosses !== text ? result.glosses : null;
-    } catch (e) {
-        console.error('[Gloss] CSV conversion failed:', e);
-    }
+    // Text is sent as typed. Text→gloss belongs to the avatar gateway — it
+    // already does it inside /translate/, so glossing here too would either
+    // duplicate it or fight it. The gloss breakdown comes back from the server.
+    const glossText = text;
+    const glossPreview = null;
 
     const msgId = _uid('msg_');
     const assistantMsgData = {

@@ -1,64 +1,23 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
-import fs from 'fs';
-
-// Plugin to serve /emercom/ CSV files as static assets and copy them during build
-function serveEmercomPlugin() {
-  return {
-    name: 'serve-emercom',
-    // Dev mode: serve files via middleware
-    configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        if (req.url && req.url.startsWith('/emercom/')) {
-          const filePath = resolve(__dirname, req.url.slice(1).split('?')[0]);
-          if (fs.existsSync(filePath)) {
-            const content = fs.readFileSync(filePath, 'utf8');
-            res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-            res.end(content);
-            return;
-          }
-        }
-        next();
-      });
-    },
-    // Build mode: copy files to dist
-    closeBundle() {
-      const src = resolve(__dirname, 'emercom');
-      const dest = resolve(__dirname, 'dist/emercom');
-      if (fs.existsSync(src)) {
-        if (!fs.existsSync(resolve(__dirname, 'dist'))) {
-          fs.mkdirSync(resolve(__dirname, 'dist'));
-        }
-        fs.cpSync(src, dest, { recursive: true });
-        console.log('[Vite] Copied emercom directory to dist');
-      }
-    }
-  };
-}
-
 
 export default defineConfig({
-  plugins: [serveEmercomPlugin()],
   server: {
     host: '0.0.0.0',
     cors: true,
     allowedHosts: true, // Allow Docker internal hostname (avatar-widget)
     proxy: {
-      // Proxy all v1 API requests (video and sessions) to the renderer service
+      // The video generator only talks to our own renderer: video generation,
+      // gloss preview, chat sessions and the admin panel. Everything
+      // avatar-related happens server-side or inside the render page, so the
+      // browser needs no proxy to the avatar or the storage backend.
       '/api/v1': {
         target: process.env.RENDERER_URL || 'http://avatar-renderer:3003',
         changeOrigin: true,
       },
 
-      // Proxy admin panel to the renderer service
       '/admin': {
         target: process.env.RENDERER_URL || 'http://avatar-renderer:3003',
-        changeOrigin: true,
-      },
-
-      // Proxy other API requests to the main backend
-      '/api': {
-        target: process.env.BACKEND_URL || 'http://host.docker.internal:8000',
         changeOrigin: true,
       }
     }
@@ -66,17 +25,8 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
+        // The video generator is the whole app now — it owns the site root.
         main: resolve(__dirname, 'index.html'),
-        headless_renderer: resolve(__dirname, 'headless-renderer.html'),
-        widget: resolve(__dirname, 'widget-demo.html'),
-        vrma: resolve(__dirname, 'test-vrma.html'),
-        embed: resolve(__dirname, 'embed.html'),
-        widget_demo: resolve(__dirname, 'widget_demo/index.html'),
-        stream_demo: resolve(__dirname, 'stream_demo/index.html'),
-        quaternion_demo: resolve(__dirname, 'quaternion_demo/index.html'),
-        mobile_demo: resolve(__dirname, 'mobile_demo/index.html'),
-        studio: resolve(__dirname, 'studio/index.html'),
-        video_generator: resolve(__dirname, 'video_generator/index.html'),
       }
     }
   }

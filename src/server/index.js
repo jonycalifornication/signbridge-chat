@@ -1,3 +1,5 @@
+import './load-env.js'; // must stay first: modules below read config at import time
+
 import express from 'express';
 import cors from 'cors';
 import puppeteer from 'puppeteer';
@@ -13,13 +15,37 @@ import {
     estimateRenderTimeoutMs,
     renderPlanToGlossPreview
 } from '../headless/render-plan.js';
-import { loadDictionaryFromText } from '../utils/gloss-dictionary.js';
 import { validateRequest, getAllKeys, createKey, deleteKey } from './api-keys.js';
+import {
+    AVATAR_URL,
+    MIRROR_ROOT,
+    candidateMatchesCurrent,
+    isMirrorReady,
+    mirrorEntryUrl,
+    mirrorStatus,
+    promoteMirror,
+    readMirrorManifest,
+    rollbackMirror,
+    syncMirror
+} from './avatar-mirror.js';
 
 const execPromise = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const port = 3003;
+const port = Number.parseInt(process.env.PORT, 10) || 3003;
+
+/**
+ * How puppeteer reaches this very server. The avatar mirror is served from here,
+ * so the render page is same-origin with the API proxy below, and `localhost` is
+ * a secure context — which WebCodecs requires.
+ */
+const SELF_URL = (process.env.SELF_URL || `http://localhost:${port}`).replace(/\/+$/, '');
+
+/**
+ * Base URL the mirrored avatar page should use for its API calls. It points at
+ * our own proxy (see `/avatar-api`), never straight at the product server.
+ */
+const AVATAR_PAGE_API_URL = `${SELF_URL}/avatar-api/v1`;
 
 app.use(cors());
 app.use(express.json({ limit: '100kb' }));
@@ -27,9 +53,14 @@ app.use(express.json({ limit: '100kb' }));
 // Temporary directory for videos
 const TEMP_DIR = path.join(__dirname, '../../temp_videos');
 const CACHE_DIR = path.join(__dirname, '../../video_cache');
-const SESSIONS_FILE = path.join(__dirname, '../../sessions.json');
+// Inside data/, never mounted as a single file: docker creates a *directory*
+// when a bind-mount source is missing, and on a fresh server sessions.json is
+// git-ignored — so a file mount silently turns into a directory and every chat
+// is lost. The same trap already bit api_keys.json once.
+const DATA_DIR = path.join(__dirname, '../../data');
+const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 
-[TEMP_DIR, CACHE_DIR].forEach(dir => {
+[TEMP_DIR, CACHE_DIR, DATA_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -37,25 +68,95 @@ const SESSIONS_FILE = path.join(__dirname, '../../sessions.json');
 
 app.use('/api/v1/video/cache', express.static(CACHE_DIR));
 
-if (!fs.existsSync(SESSIONS_FILE)) {
+// ── Avatar mirror ─────────────────────────────────────────────────────
+// The mirrored avatar build is served from this box so a render never hits the
+// GPU-less product server. Puppeteer opens /avatar/current/embed.html.
+app.use('/avatar', express.static(MIRROR_ROOT, {
+    setHeaders: (res) => res.set('Cache-Control', 'no-store'),
+}));
+
+// Vite bakes root-absolute paths into its modulepreload hints (`/assets/…`),
+// even though the real imports next to them are relative. Serving the mirror's
+// assets at the root as well keeps those hints working instead of turning every
+// render into a handful of 404s that drown out real errors. `current` is a
+// directory that gets renamed on promote, so this path always tracks the live
+// build; `candidate` is the fallback used while a fresh build is being vetted.
+app.use('/assets', express.static(path.join(MIRROR_ROOT, 'current', 'assets')));
+app.use('/assets', express.static(path.join(MIRROR_ROOT, 'candidate', 'assets')));
+
+/**
+ * Only the render page (same machine) may use the avatar API proxy — it carries
+ * our API key, and port 3003 is published in docker-compose.
+ */
+function loopbackOnly(req, res, next) {
+    const address = req.socket.remoteAddress || '';
+    const isLoopback = address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
+    if (!isLoopback) {
+        return res.status(403).json({ error: 'Forbidden: avatar API proxy is loopback-only' });
+    }
+    next();
+}
+
+/**
+ * Avatar API proxy.
+ *
+ * Split by weight, on purpose:
+ *   - `/translate/` and the CMS lookups go to the avatar gateway, so glossing,
+ *     key validation and per-key metering stay where they belong. That is one
+ *     light request per video on the product server.
+ *   - `/files/download` (dozens of VRMA files per video) goes straight to the
+ *     storage backend, so the heavy traffic never crosses the product server.
+ *     Absolute S3 `file_url`s bypass this proxy entirely anyway.
+ */
+const AVATAR_API_BASE = `${AVATAR_URL}/api/v1`;
+const AVATAR_FILES_BASE = (process.env.AVATAR_FILES_URL || process.env.BACKEND_URL || AVATAR_URL).replace(/\/+$/, '') + '/api/v1';
+const AVATAR_API_KEY = process.env.AVATAR_API_KEY || '';
+
+function avatarUpstreamFor(subPath) {
+    return subPath.startsWith('/files/') ? AVATAR_FILES_BASE : AVATAR_API_BASE;
+}
+
+// The widget pings this before translating; answer locally instead of letting it
+// hit the avatar's SPA fallback, which returns HTML with a misleading 200.
+app.get('/avatar-api/health', loopbackOnly, (req, res) => {
+    res.json({ status: 'ok', service: 'avatar-api-proxy' });
+});
+
+app.all('/avatar-api/v1/*', loopbackOnly, async (req, res) => {
+    const subPath = req.params[0] ? `/${req.params[0]}` : '/';
+    const query = new URLSearchParams(req.query).toString();
+    const upstream = `${avatarUpstreamFor(subPath)}${subPath}${query ? `?${query}` : ''}`;
+
+    try {
+        const headers = { 'X-API-Key': AVATAR_API_KEY };
+        const options = { method: req.method, headers };
+
+        if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
+            headers['Content-Type'] = 'application/json';
+            options.body = JSON.stringify(req.body);
+        }
+
+        const upstreamRes = await fetch(upstream, options);
+        const body = Buffer.from(await upstreamRes.arrayBuffer());
+        const contentType = upstreamRes.headers.get('content-type');
+
+        res.status(upstreamRes.status);
+        if (contentType) res.set('Content-Type', contentType);
+        res.send(body);
+    } catch (err) {
+        console.error(`[AvatarProxy] ${req.method} ${subPath} failed:`, err.message);
+        res.status(502).json({ error: 'Avatar upstream unavailable', detail: err.message });
+    }
+});
+
+if (fs.existsSync(SESSIONS_FILE) && fs.statSync(SESSIONS_FILE).isDirectory()) {
+    console.error(`[Storage] ${SESSIONS_FILE} is a directory, not a file — chat history cannot be saved.`);
+    console.error('[Storage] Remove it (a stale docker bind-mount) and restart.');
+} else if (!fs.existsSync(SESSIONS_FILE)) {
     fs.writeFileSync(SESSIONS_FILE, JSON.stringify([]));
 }
 
 const tasks = new Map();
-
-// Pre-load dictionaries from filesystem for server-side glossing
-try {
-    const EMERCOM_DIR = path.join(__dirname, '../../emercom');
-    const kkCsv = fs.readFileSync(path.join(EMERCOM_DIR, 'kazakh.csv'), 'utf8');
-    const ruCsv = fs.readFileSync(path.join(EMERCOM_DIR, 'russian.csv'), 'utf8');
-    
-    loadDictionaryFromText('kk', kkCsv);
-    loadDictionaryFromText('ru', ruCsv);
-    console.log('[Server] CSV Dictionaries pre-loaded successfully');
-} catch (dictErr) {
-    console.error('[Server] Failed to pre-load CSV dictionaries:', dictErr.message);
-}
-
 
 const MAX_CACHE_SIZE = 100 * 1024 * 1024; // 100 MB
 
@@ -72,16 +173,18 @@ function getCacheKey(config) {
     return crypto.createHash('md5').update(str).digest('hex');
 }
 
-function resolveRenderPlanApiConfig(appUrl) {
-    const rawApiUrl = process.env.RENDER_PLAN_API_URL || process.env.API_URL || process.env.VITE_API_URL || `${appUrl}/api/v1`;
-    const apiUrl = rawApiUrl.startsWith('/')
-        ? `${appUrl.replace(/\/+$/, '')}${rawApiUrl}`
-        : rawApiUrl;
+/**
+ * Where the server-side render plan is built. This is the one light request per
+ * video that legitimately belongs on the avatar gateway: it validates our key,
+ * meters usage and performs text→gloss on its side.
+ */
+function resolveRenderPlanApiConfig() {
+    const rawApiUrl = process.env.RENDER_PLAN_API_URL || `${AVATAR_URL}/api/v1`;
 
     return {
-        apiUrl,
-        apiKey: process.env.RENDER_PLAN_API_KEY || process.env.API_KEY || process.env.VITE_API_KEY || '',
-        languageId: process.env.RENDER_PLAN_LANGUAGE_ID || process.env.VITE_LANGUAGE_ID || 'kz_KSL',
+        apiUrl: rawApiUrl.replace(/\/+$/, ''),
+        apiKey: AVATAR_API_KEY,
+        languageId: process.env.RENDER_PLAN_LANGUAGE_ID || 'KSL',
         fetchTimeoutMs: Number(process.env.RENDER_PLAN_FETCH_TIMEOUT_MS) || 10000,
     };
 }
@@ -99,14 +202,14 @@ function resolveEncoderMaxQueueSize(hasGPU) {
     return Math.max(1, Math.min(parsed, 256));
 }
 
-async function prepareRenderPlan(glosses, appUrl, hasGPU, onProgress = null, mode = 'normal') {
+async function prepareRenderPlan(glosses, hasGPU, onProgress = null, mode = 'normal') {
     const renderText = Array.isArray(glosses) ? glosses.join(' ') : String(glosses || '');
     let renderPlan = null;
     let renderTimeoutMs = estimateFallbackTimeoutMs(renderText, { hasGPU });
 
     try {
         if (onProgress) onProgress(8, 'Строим план жестов...');
-        const planOptions = { ...resolveRenderPlanApiConfig(appUrl), mode };
+        const planOptions = { ...resolveRenderPlanApiConfig(), mode };
         renderPlan = await buildRenderPlan(renderText, planOptions);
         renderTimeoutMs = estimateRenderTimeoutMs(renderPlan, { hasGPU });
         console.log(`[Server] Render plan ready: ${JSON.stringify(renderPlan.stats)}, timeout=${Math.round(renderTimeoutMs / 1000)}s`);
@@ -230,6 +333,29 @@ async function apiKeyAuth(req, res, next) {
     next();
 }
 
+const MUXER_LOCAL_PATH = path.join(__dirname, '../../node_modules/webm-muxer/build/webm-muxer.js');
+const MUXER_CDN_URL = 'https://cdn.jsdelivr.net/npm/webm-muxer@5.0.2/build/webm-muxer.js';
+const INJECT_RENDERER_PATH = path.join(__dirname, '../headless/inject-renderer.js');
+
+/**
+ * Put our video pipeline inside the avatar's page.
+ *
+ * `inject-renderer.js` is intentionally import-free so it can be injected as a
+ * plain script with no build step. The muxer is served from node_modules when
+ * available so a render does not depend on a CDN; the CDN stays as a fallback
+ * for setups that have not installed it yet.
+ */
+async function injectRenderer(page) {
+    if (fs.existsSync(MUXER_LOCAL_PATH)) {
+        await page.addScriptTag({ path: MUXER_LOCAL_PATH });
+    } else {
+        console.warn('[Server] webm-muxer not found in node_modules — falling back to CDN. Run `npm install`.');
+        await page.addScriptTag({ url: MUXER_CDN_URL });
+    }
+
+    await page.addScriptTag({ path: INJECT_RENDERER_PATH });
+}
+
 /**
  * Core Video Generation Logic
  */
@@ -237,9 +363,17 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
     let browser;
     try {
         if(onProgress) onProgress(5, 'Прогреваем видеопроцессоры...');
-        
-        const appUrl = process.env.APP_URL || 'http://localhost:5173';
-        
+
+        // Which copy of the mirrored avatar to render with. Always 'current',
+        // except for the smoke render that vets a freshly synced 'candidate'.
+        const mirrorVariant = planning.mirrorVariant || 'current';
+        if (!isMirrorReady(mirrorVariant)) {
+            throw new Error(
+                `Avatar mirror "${mirrorVariant}" is empty. Run a sync first ` +
+                '(npm run avatar:sync, or POST /admin/avatar/sync).'
+            );
+        }
+
         const hasGPU = hasRendererGPU();
         console.log(`[Server] GPU mode: ${hasGPU ? 'NVIDIA (EGL)' : 'ANGLE SwiftShader (CPU)'}`);
         const encoderMaxQueueSize = resolveEncoderMaxQueueSize(hasGPU);
@@ -251,7 +385,7 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                     ? planning.renderTimeoutMs
                     : estimateRenderTimeoutMs(planning.renderPlan, { hasGPU })
             }
-            : await prepareRenderPlan(glosses, appUrl, hasGPU, onProgress, planning.mode || 'normal');
+            : await prepareRenderPlan(glosses, hasGPU, onProgress, planning.mode || 'normal');
         const { renderPlan, renderTimeoutMs } = preparedPlan;
 
         browser = await puppeteer.launch({
@@ -273,7 +407,7 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                 '--enable-gpu-rasterization',
                 '--enable-zero-copy',
                 '--ignore-gpu-blocklist',
-                `--unsafely-treat-insecure-origin-as-secure=${appUrl}`
+                `--unsafely-treat-insecure-origin-as-secure=${SELF_URL}`
             ],
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null
         });
@@ -296,14 +430,24 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
             console.log(`[Browser Blocked] ${request.failure()?.errorText || 'Failed'}: ${request.method()} ${request.url()}`);
         });
 
-        const rendererUrl = `${appUrl}/headless-renderer.html`;
+        // Render inside the avatar's own embed page (served from our local
+        // mirror), then inject our renderer into it. The avatar stays untouched:
+        // we only call its public API from the injected script.
+        const rendererUrl = `${mirrorEntryUrl(SELF_URL, mirrorVariant)}?${new URLSearchParams({
+            apiUrl: AVATAR_PAGE_API_URL,
+            apiKey: AVATAR_API_KEY,
+            languageId: process.env.RENDER_PLAN_LANGUAGE_ID || 'KSL',
+        }).toString()}`;
 
-        console.log(`[Server] Navigating to renderer: ${rendererUrl}`);
+        console.log(`[Server] Navigating to mirrored avatar page: ${mirrorEntryUrl(SELF_URL, mirrorVariant)}`);
         if(onProgress) onProgress(10, 'Материализуем 3D-аватар из матрицы 🕶');
         await page.goto(rendererUrl, { waitUntil: 'networkidle0', timeout: 30000 });
 
-        console.log(`[Server] Waiting for window.rendererLoaded...`);
-        await page.waitForFunction(() => window.rendererLoaded === true, { timeout: 30000 });
+        console.log(`[Server] Injecting muxer and headless renderer...`);
+        await injectRenderer(page);
+
+        console.log(`[Server] Waiting for the injected renderer...`);
+        await page.waitForFunction(() => window.headlessRendererReady === true, { timeout: 30000 });
 
         if(onProgress) onProgress(20, 'Анализируем текст и подбираем жесты 🧠');
         console.log(`[Server] Starting recording...`);
@@ -314,7 +458,17 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
             dataUrl = await Promise.race([
                 page.evaluate(async (config) => {
                     return await window.startHeadlessRender(config);
-                }, { glosses, avatar, background, renderPlan, renderProfile: { hasGPU, encoderMaxQueueSize } }),
+                }, {
+                    glosses,
+                    avatar,
+                    background,
+                    renderPlan,
+                    // The gateway was already called once, server-side. Hand the
+                    // response over so the page does not translate a second time.
+                    translateResponse: renderPlan?.response || null,
+                    languageId: renderPlan?.languageId || null,
+                    renderProfile: { hasGPU, encoderMaxQueueSize }
+                }),
                 new Promise((_, reject) => {
                     renderTimer = setTimeout(
                         () => reject(new Error(`Render timeout: exceeded ${Math.round(renderTimeoutMs / 1000)} seconds`)),
@@ -410,8 +564,7 @@ app.post('/api/v1/video/preview', rateLimit, apiKeyAuth, async (req, res) => {
     }
 
     try {
-        const appUrl = process.env.APP_URL || 'http://localhost:5173';
-        const planOptions = { ...resolveRenderPlanApiConfig(appUrl), mode: mode || 'normal' };
+        const planOptions = { ...resolveRenderPlanApiConfig(), mode: mode || 'normal' };
         const renderPlan = await buildRenderPlan(glosses, planOptions);
         const renderPreview = renderPlanToGlossPreview(renderPlan);
 
@@ -474,9 +627,8 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
         }
     }
 
-    const appUrl = process.env.APP_URL || 'http://localhost:5173';
     const hasGPU = hasRendererGPU();
-    const { renderPlan, renderTimeoutMs } = await prepareRenderPlan(glosses, appUrl, hasGPU, null, mode);
+    const { renderPlan, renderTimeoutMs } = await prepareRenderPlan(glosses, hasGPU, null, mode);
     const renderPreview = renderPlan ? renderPlanToGlossPreview(renderPlan) : null;
 
     // Initialize task
@@ -809,6 +961,135 @@ app.delete('/admin/api/keys/:id', async (req, res) => {
 });
 
 /**
+ * Avatar mirror management.
+ *
+ * A sync never goes live on trust: the freshly downloaded build is vetted by a
+ * real (tiny) render before it replaces the one production uses. A broken avatar
+ * deploy therefore cannot break video generation — it just leaves the previous
+ * mirror in place and reports the failure.
+ */
+const SMOKE_TEST_GLOSSES = process.env.AVATAR_SMOKE_GLOSSES || 'алақан';
+let mirrorSyncInFlight = null;
+
+async function smokeTestMirror(variant) {
+    const started = Date.now();
+    const result = await generateVideoCore(
+        SMOKE_TEST_GLOSSES,
+        undefined,
+        'green',
+        'avatar-mirror-smoke-test',
+        null,
+        { mirrorVariant: variant, mode: 'normal' },
+    );
+
+    const filePath = result.sendWebM ? result.webmPath : result.mp4Path;
+    const { size } = await fs.promises.stat(filePath);
+    await fs.promises.unlink(filePath).catch(() => {});
+
+    if (size < 1024) {
+        throw new Error(`Smoke render produced only ${size} bytes`);
+    }
+
+    return { bytes: size, durationMs: Date.now() - started };
+}
+
+/**
+ * Download the deployed avatar, smoke-test it, then promote it.
+ * @param {object} [options]
+ * @param {boolean} [options.force] - promote even when nothing changed
+ * @param {boolean} [options.skipSmokeTest] - promote without rendering (manual override)
+ */
+async function refreshAvatarMirror({ force = false, skipSmokeTest = false } = {}) {
+    if (mirrorSyncInFlight) return mirrorSyncInFlight;
+
+    mirrorSyncInFlight = (async () => {
+        const log = (msg) => console.log(`[AvatarMirror] ${msg}`);
+        const manifest = await syncMirror({ onLog: log });
+
+        if (!force && isMirrorReady('current') && candidateMatchesCurrent()) {
+            log('Deployed avatar is unchanged — keeping the current mirror.');
+            return { changed: false, promoted: false, manifest: readMirrorManifest('current') };
+        }
+
+        let smoke = null;
+        if (!skipSmokeTest) {
+            log('Smoke-testing the candidate mirror...');
+            try {
+                smoke = await smokeTestMirror('candidate');
+                log(`Smoke test passed (${smoke.bytes} bytes in ${smoke.durationMs}ms).`);
+            } catch (err) {
+                log(`Smoke test FAILED: ${err.message}. Keeping the current mirror.`);
+                return {
+                    changed: true,
+                    promoted: false,
+                    error: err.message,
+                    candidate: manifest,
+                    manifest: readMirrorManifest('current'),
+                };
+            }
+        }
+
+        const promoted = promoteMirror();
+        log(`Promoted new avatar build (synced ${promoted.syncedAt}).`);
+        return { changed: true, promoted: true, smoke, manifest: promoted };
+    })();
+
+    try {
+        return await mirrorSyncInFlight;
+    } finally {
+        mirrorSyncInFlight = null;
+    }
+}
+
+/**
+ * The admin surface manages API keys and can roll the avatar mirror back, so it
+ * must not be reachable from the internet. Loopback is always allowed (SSH in,
+ * or tunnel the port); anything else needs ADMIN_TOKEN. nginx no longer proxies
+ * /admin/ at all, so this is defence in depth rather than the only lock.
+ */
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
+
+function adminOnly(req, res, next) {
+    const address = req.socket.remoteAddress || '';
+    if (address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1') return next();
+
+    if (ADMIN_TOKEN && req.headers['x-admin-token'] === ADMIN_TOKEN) return next();
+
+    return res.status(403).json({
+        error: ADMIN_TOKEN
+            ? 'Forbidden: bad or missing X-Admin-Token'
+            : 'Forbidden: admin is loopback-only. Set ADMIN_TOKEN to allow remote access.',
+    });
+}
+
+app.use('/admin', adminOnly);
+
+app.get('/admin/avatar/status', (req, res) => {
+    res.json({ ...mirrorStatus(), syncInProgress: Boolean(mirrorSyncInFlight) });
+});
+
+app.post('/admin/avatar/sync', async (req, res) => {
+    try {
+        const result = await refreshAvatarMirror({
+            force: req.body?.force === true,
+            skipSmokeTest: req.body?.skipSmokeTest === true,
+        });
+        res.status(result.error ? 409 : 200).json(result);
+    } catch (err) {
+        console.error('[AvatarMirror] Sync failed:', err.message);
+        res.status(502).json({ error: 'Avatar sync failed', detail: err.message });
+    }
+});
+
+app.post('/admin/avatar/rollback', (req, res) => {
+    try {
+        res.json({ manifest: rollbackMirror() });
+    } catch (err) {
+        res.status(409).json({ error: err.message });
+    }
+});
+
+/**
  * Chat Session Persistence API (Shared)
  */
 async function getSessionsFromDisk() {
@@ -999,6 +1280,43 @@ setInterval(async () => {
     } catch(e) { console.error('[Cleanup] Error:', e); }
 }, 600000); // Every 10 minutes
 
+/**
+ * Keep the mirrored avatar fresh.
+ *
+ * On boot we only sync when there is nothing to render with, so a restart never
+ * blocks on the product server. Periodic refreshes are opt-in via
+ * AVATAR_SYNC_INTERVAL_MS; both paths go through the smoke test.
+ */
+async function bootstrapAvatarMirror() {
+    if (!isMirrorReady('current')) {
+        console.log('[AvatarMirror] No mirror yet — fetching the deployed avatar...');
+        try {
+            await refreshAvatarMirror({ force: true });
+        } catch (err) {
+            console.error(`[AvatarMirror] Initial sync failed: ${err.message}`);
+            console.error('[AvatarMirror] Video generation stays unavailable until a sync succeeds.');
+        }
+    } else {
+        const manifest = readMirrorManifest('current');
+        console.log(`[AvatarMirror] Serving mirror synced at ${manifest?.syncedAt || 'unknown time'} from ${AVATAR_URL}`);
+    }
+
+    const intervalMs = Number.parseInt(process.env.AVATAR_SYNC_INTERVAL_MS, 10);
+    if (Number.isFinite(intervalMs) && intervalMs >= 60000) {
+        console.log(`[AvatarMirror] Auto-sync every ${Math.round(intervalMs / 60000)} min`);
+        setInterval(() => {
+            refreshAvatarMirror().catch(err =>
+                console.error(`[AvatarMirror] Scheduled sync failed: ${err.message}`));
+        }, intervalMs);
+    }
+}
+
 app.listen(port, '0.0.0.0', () => {
     console.log(`[Server] Video Renderer API listening at http://0.0.0.0:${port}`);
+    console.log(`[Server] Avatar source: ${AVATAR_URL} (mirrored locally, never rendered on)`);
+    if (!AVATAR_API_KEY) {
+        console.error('[Server] ⚠️  AVATAR_API_KEY is empty — every gesture lookup will return 401 and');
+        console.error('[Server]     videos will come out with moving lips and no signing. Set it in .env.');
+    }
+    bootstrapAvatarMirror();
 });

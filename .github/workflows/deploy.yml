@@ -61,28 +61,40 @@ jobs:
                 echo ".env restored from backup"
               elif [ -f .env.example ]; then
                 cp .env.example .env
-                echo ".env created from .env.example"
+                echo "ERROR: .env создан из .env.example, но AVATAR_API_KEY пуст — compose не стартует."
+                echo "Пропиши ключ в $SERVER_APP_DIR/.env и запусти деплой заново."
+                exit 1
               else
                 echo "ERROR: no .env, no .env.backup, no .env.example"
                 exit 1
               fi
             fi
 
-            # Запускаем ТОЛЬКО базовый compose (чтобы не подхватился docker-compose.override.yml)
-            docker compose -f docker-compose.yml up -d --build --remove-orphans --force-recreate
-            docker compose -f docker-compose.yml ps
+            # Базовый compose явно (чтобы не подхватился docker-compose.override.yml).
+            # На хосте с NVIDIA дополнительно накладываем GPU-оверлей — без него
+            # рендер уходит на CPU/SwiftShader и становится в разы медленнее.
+            COMPOSE="-f docker-compose.yml"
+            if [ -e /dev/nvidia0 ]; then
+              COMPOSE="$COMPOSE -f docker-compose.gpu.yml"
+              echo "NVIDIA обнаружена — включаю GPU-оверлей"
+            else
+              echo "GPU не найдена — рендер пойдёт на CPU"
+            fi
 
-            CID="$(docker compose -f docker-compose.yml ps -q avatar-widget || true)"
+            docker compose $COMPOSE up -d --build --remove-orphans --force-recreate
+            docker compose $COMPOSE ps
+
+            CID="$(docker compose $COMPOSE ps -q avatar-widget || true)"
             if [ -z "$CID" ]; then
               echo "Container for service 'avatar-widget' not found."
-              docker compose -f docker-compose.yml logs --no-color --tail=200
+              docker compose $COMPOSE logs --no-color --tail=200
               exit 1
             fi
 
             STATUS="$(docker inspect -f '{{.State.Status}}' "$CID" 2>/dev/null || true)"
             if [ "$STATUS" != "running" ]; then
               echo "Container is not running. Status: $STATUS"
-              docker compose -f docker-compose.yml logs --no-color --tail=200
+              docker compose $COMPOSE logs --no-color --tail=200
               exit 1
             fi
 
@@ -96,5 +108,5 @@ jobs:
             done
 
             echo "Timeout waiting for $HEALTHCHECK_URL"
-            docker compose -f docker-compose.yml logs --no-color --tail=200
+            docker compose $COMPOSE logs --no-color --tail=200
             exit 1

@@ -28,3 +28,6 @@ fbx_demo
 # Other ignored files
 instruction.md
 options.md
+
+# Local avatar mirror (fetched at runtime into a volume)
+avatar_mirror

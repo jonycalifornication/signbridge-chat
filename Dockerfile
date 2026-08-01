@@ -5,13 +5,8 @@ WORKDIR /app
 # Disable Puppeteer Chromium download to speed up layer caching significantly
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 
-# Frontend build-time variables (used by Vite import.meta.env)
-ARG VITE_API_URL=/api/v1
-ARG VITE_API_KEY=
-ARG VITE_LANGUAGE_ID=kz_KSL
-ENV VITE_API_URL=${VITE_API_URL}
-ENV VITE_API_KEY=${VITE_API_KEY}
-ENV VITE_LANGUAGE_ID=${VITE_LANGUAGE_ID}
+# No VITE_* build args: the UI only talks to our own renderer over relative
+# paths, and no API key is baked into the frontend any more.
 
 # Install compatibility libraries for Alpine
 RUN apk add --no-cache libc6-compat

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   avatar-widget:
     build:
@@ -11,8 +9,6 @@ services:
       - .:/app
       - /app/node_modules
     environment:
-      - VITE_API_KEY=sbk_XUQqK17Ui7Gqqe9myqm0S0HGfL52rUWv01KiQMg56S0
-      - VITE_API_URL=http://94.131.83.85:8000/api/v1
       - RENDERER_URL=http://avatar-renderer:3003
     command: >
       sh -c "npm install && npm run dev -- --host"
@@ -25,11 +21,14 @@ services:
       - "3003:3003"
 
     environment:
-      - APP_URL=http://avatar-widget:5173
-      - RENDER_PLAN_API_URL=${BACKEND_URL:-http://host.docker.internal:8000}/api/v1
-      - RENDER_PLAN_API_KEY=${VITE_API_KEY:-sbk_XUQqK17Ui7Gqqe9myqm0S0HGfL52rUWv01KiQMg56S0}
-      - RENDER_PLAN_LANGUAGE_ID=${VITE_LANGUAGE_ID:-kz_KSL}
+      - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
+      - AVATAR_API_KEY=${AVATAR_API_KEY:?set AVATAR_API_KEY in .env}
+      - AVATAR_FILES_URL=${AVATAR_FILES_URL:-http://host.docker.internal:8000}
+      - RENDER_PLAN_LANGUAGE_ID=${RENDER_PLAN_LANGUAGE_ID:-KSL}
     volumes:
       - .:/app
       - /app/node_modules
       - ./data:/app/data
+      - ./avatar_mirror:/app/avatar_mirror
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

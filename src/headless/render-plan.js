@@ -1,11 +1,10 @@
 import { CONFIG } from '../config.js';
 import { expandDatesInText } from '../utils/date-glosses.js';
 import { normalizeNumericText } from '../utils/number-glosses.js';
-import { loadDictionary, textToGlosses, detectDictLang, isDictionaryLoaded } from '../utils/gloss-dictionary.js';
 
 const LETTER_RE = /[0-9A-Za-z\u0400-\u04FF°]/;
 const DEFAULT_FETCH_TIMEOUT_MS = 10000;
-const DEFAULT_LANGUAGE_ID = CONFIG.languageId || 'kz_KSL';
+const DEFAULT_LANGUAGE_ID = CONFIG.languageId || 'KSL';
 
 function normalizeApiUrl(apiUrl) {
     if (typeof apiUrl !== 'string' || !apiUrl.trim()) {
@@ -30,7 +29,15 @@ function getItemGloss(item) {
     return String(item?.gloss_name || item?.word || item?.text || '').trim();
 }
 
-async function translateText(text, options) {
+/**
+ * @param {string} text
+ * @param {object} options - { apiUrl, apiKey, languageId, fetchTimeoutMs }
+ * @param {object} [flags]
+ * @param {boolean} [flags.alreadyGlossed] - when true, tells the avatar gateway
+ *   to skip its own text→gloss step because we already glossed the text. Passing
+ *   false lets the gateway act as a fallback glosser.
+ */
+async function translateText(text, options, { alreadyGlossed = true } = {}) {
     const apiUrl = normalizeApiUrl(options.apiUrl);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), options.fetchTimeoutMs || DEFAULT_FETCH_TIMEOUT_MS);
@@ -45,6 +52,7 @@ async function translateText(text, options) {
             body: JSON.stringify({
                 text,
                 language_id: options.languageId || DEFAULT_LANGUAGE_ID,
+                already_glossed: alreadyGlossed,
             }),
             signal: controller.signal,
         });
@@ -60,59 +68,6 @@ async function translateText(text, options) {
     }
 }
 
-function createLetterResolver(options) {
-    const cache = new Map();
-
-    return async function resolveLetter(letter) {
-        const key = letter.toLowerCase();
-        if (cache.has(key)) return cache.get(key);
-
-        const promise = (async () => {
-            if (CONFIG.animations[key]) {
-                return {
-                    char: key,
-                    found: true,
-                    source: 'local',
-                    animationName: key,
-                    fileUrl: null,
-                    gloss: key.toUpperCase(),
-                };
-            }
-
-            try {
-                const response = await translateText(key, options);
-                const sequence = Array.isArray(response?.sequence) ? response.sequence : [];
-                const match = sequence.find(item => item?.found && item?.file_url);
-
-                if (match) {
-                    return {
-                        char: key,
-                        found: true,
-                        source: 'remote',
-                        animationName: null,
-                        fileUrl: match.file_url,
-                        gloss: getItemGloss(match) || key.toUpperCase(),
-                    };
-                }
-            } catch (error) {
-                console.warn(`[RenderPlan] Letter lookup failed for "${key}": ${error.message}`);
-            }
-
-            return {
-                char: key,
-                found: false,
-                source: 'missing',
-                animationName: null,
-                fileUrl: null,
-                gloss: key,
-            };
-        })();
-
-        cache.set(key, promise);
-        return promise;
-    };
-}
-
 function makeAnimationItem(item) {
     const original = getItemText(item);
     return {
@@ -126,28 +81,21 @@ function makeAnimationItem(item) {
     };
 }
 
-async function makeDactylItem(word, resolveLetter) {
+/**
+ * A word the backend has no gloss for. We only describe it — the widget's
+ * `playTextAsLetters()` resolves, downloads and pre-parses the letter clips
+ * itself, so there is no reason to spend a `/translate/` call per letter here
+ * just to say the same thing twice.
+ */
+function makeDactylItem(word) {
     const letters = splitDactylLetters(word);
-    const resolvedLetters = await Promise.all(letters.map(letter => resolveLetter(letter)));
-    const foundLetters = resolvedLetters.filter(letter => letter.found).length;
-
-    let kind = 'missing';
-    if (foundLetters === letters.length && letters.length > 0) {
-        kind = 'dactyl';
-    } else if (foundLetters > 0) {
-        kind = 'partial-dactyl';
-    }
 
     return {
-        kind,
+        kind: letters.length > 0 ? 'dactyl' : 'missing',
         original: word,
         spokenText: word,
-        gloss: resolvedLetters
-            .map(letter => (letter.found ? letter.gloss : letter.char).toUpperCase())
-            .join(' '),
-        letters: resolvedLetters,
-        foundLetters,
-        missingLetters: Math.max(0, letters.length - foundLetters),
+        gloss: letters.join(' ').toUpperCase(),
+        letters: letters.map(char => ({ char, source: 'widget' })),
     };
 }
 
@@ -171,8 +119,6 @@ function summarizePlan(items) {
         if (item.kind === 'dactyl' || item.kind === 'partial-dactyl') {
             stats.dactylItems++;
             stats.dactylLetters += item.letters?.length || 0;
-            stats.missingLetters += item.missingLetters || 0;
-            stats.remoteFiles += (item.letters || []).filter(letter => letter.source === 'remote' && letter.fileUrl).length;
             continue;
         }
 
@@ -212,23 +158,6 @@ export function estimateFallbackTimeoutMs(text, { hasGPU = false } = {}) {
     return clamp(estimate, hasGPU ? 180000 : 240000, hasGPU ? 600000 : 900000);
 }
 
-export function collectRenderPlanFileUrls(plan) {
-    const urls = [];
-
-    for (const item of plan?.items || []) {
-        if (item.kind === 'animation' && item.source === 'remote' && item.fileUrl) {
-            urls.push(item.fileUrl);
-        }
-        for (const letter of item.letters || []) {
-            if (letter.source === 'remote' && letter.fileUrl) {
-                urls.push(letter.fileUrl);
-            }
-        }
-    }
-
-    return [...new Set(urls)];
-}
-
 export function renderPlanToGlossPreview(plan) {
     const tokens = (plan?.items || []).map(item => {
         const kind = item.kind === 'animation' ? 'matched' : item.kind;
@@ -250,96 +179,33 @@ export function normalizeRenderText(text) {
     return normalizeNumericText(expandDatesInText(normalizeText(text), 'kk'));
 }
 
-async function aiTextToGloss(text, langId) {
-    const aiUrl = 'http://94.131.83.85:8010/api/t2g/glossing';
-    const apiKey = 'sta_SjLaEdygAVPJ0YKDbpmm0EXxhJwim10JkOQ9eExkIPA';
-    
-    // Подстраиваем язык для AI API (ожидает 'kz', 'ru' и т.д.)
-    let glossLang = 'kz';
-    if (langId && langId.toLowerCase().startsWith('ru')) {
-        glossLang = 'ru';
-    }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-    try {
-        const response = await fetch(aiUrl, {
-            method: 'POST',
-            headers: {
-                'accept': 'application/json',
-                'X-API-Key': apiKey,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                text: text,
-                gloss_language: glossLang
-            }),
-            signal: controller.signal
-        });
-
-        if (!response.ok) {
-            throw new Error(`AI API failed with status ${response.status}`);
-        }
-
-        const data = await response.json();
-        return data?.lemmas_text || text;
-    } finally {
-        clearTimeout(timeoutId);
-    }
-}
-
+/**
+ * Build everything the renderer needs for one video.
+ *
+ * Text→gloss is NOT done here. The avatar gateway already does it inside
+ * `/translate/` ("сәлем достар" → "сәлем дос"), with its own scoring, caching
+ * and per-key metering — so we send the plain text and let it gloss. That keeps
+ * the video's glosses identical to what the live widget produces for the same
+ * text, and leaves exactly one implementation of glossing in the system.
+ *
+ * What we still do here, because the page cannot:
+ *   - summarise the work, which drives the render timeout;
+ *   - produce the gloss preview shown in the UI.
+ *
+ * The raw `response` is returned untouched and handed to the widget's own
+ * `playTranslateResponse()`, which owns playback.
+ */
 export async function buildRenderPlan(text, options) {
     const normalizedText = normalizeRenderText(text);
 
-    // Pre-process through CSV dictionary: convert text to glosses before sending to /translate/
-    let glossText = normalizedText;
-    
-    if (options.mode === 'normal') {
-        try {
-            console.log(`[RenderPlan] Mode is normal. Calling AI Glossing for: "${normalizedText}"`);
-            const aiGloss = await aiTextToGloss(normalizedText, options.languageId || DEFAULT_LANGUAGE_ID);
-            if (aiGloss && aiGloss.trim()) {
-                glossText = aiGloss;
-                console.log(`[RenderPlan] AI Glossing returned: "${glossText}"`);
-            }
-        } catch (err) {
-            console.warn(`[RenderPlan] AI Glossing failed, falling back to CSV: ${err.message}`);
-        }
-    }
-
-    // Если ИИ не использовался или вернул тот же текст (или упал с ошибкой) - используем CSV
-    if (glossText === normalizedText) {
-        try {
-            const lang = detectDictLang(normalizedText);
-            // If no dictionary is loaded, or we need to switch language
-            if (getActiveLang() !== lang) {
-                // Only try to fetch if we are in a browser environment
-                if (typeof fetch === 'function') {
-                    await loadDictionary(lang);
-                }
-            }
-            
-            if (isDictionaryLoaded() && getActiveLang() === lang) {
-                const csvResult = textToGlosses(normalizedText);
-                if (csvResult.glosses && csvResult.glosses !== normalizedText) {
-                    console.log(`[RenderPlan] CSV pre-processed (${lang}): "${normalizedText}" → "${csvResult.glosses}"`);
-                    glossText = csvResult.glosses;
-                }
-            }
-        } catch (csvErr) {
-            console.warn(`[RenderPlan] CSV pre-processing failed: ${csvErr.message}`);
-        }
-    }
-
-    const response = await translateText(glossText, options);
+    const response = await translateText(normalizedText, options, { alreadyGlossed: false });
     const sequence = Array.isArray(response?.sequence) ? response.sequence : [];
-    const resolveLetter = createLetterResolver(options);
+    
     const items = [];
 
-    if (sequence.length === 0 && glossText) {
-        // If API returned nothing, use dactyl for the entire glossed text
-        items.push(await makeDactylItem(glossText, resolveLetter));
+    if (sequence.length === 0 && normalizedText) {
+        // Nothing came back at all — finger-spell the whole text.
+        items.push(makeDactylItem(normalizedText));
     } else {
         for (const item of sequence) {
             const original = getItemText(item);
@@ -348,8 +214,8 @@ export async function buildRenderPlan(text, options) {
             if (item?.found && item?.file_url) {
                 items.push(makeAnimationItem(item));
             } else {
-                // This 'original' is the word returned by API (which is our glossed word)
-                items.push(await makeDactylItem(original, resolveLetter));
+                // `original` is the gloss the gateway produced for this word.
+                items.push(makeDactylItem(original));
             }
         }
     }
@@ -357,11 +223,14 @@ export async function buildRenderPlan(text, options) {
     const stats = summarizePlan(items);
 
     return {
-        version: 1,
+        version: 2,
         text: normalizedText,
         languageId: options.languageId || DEFAULT_LANGUAGE_ID,
         items,
         stats,
         glosses: items.map(item => item.gloss || item.original).join(' '),
+        // Handed to the widget's playTranslateResponse() — it owns playback,
+        // including glued second clips and the letter fallback.
+        response,
     };
 }

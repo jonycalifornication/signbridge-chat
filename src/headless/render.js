@@ -26,9 +26,11 @@ Options:
   --output="filename.webm" Output filename (default: "output.webm")
   --avatar="Name"          Avatar name from config (default: "Aibek")
   --background="color"     Background color or "green"/"transparent" (default: "green")
-  --url="http://..."       Renderer URL (default: "http://localhost:5173/headless-renderer.html")
+  --url="http://..."       Mirrored avatar page (default: "http://localhost:3003/avatar/current/embed.html")
   --width=1280             Viewport width (default: 1280)
   --height=720             Viewport height (default: 720)
+
+Requires the render server to be running, since it serves the avatar mirror.
         `);
         return;
     }
@@ -37,7 +39,7 @@ Options:
     const output = args.output || 'output.webm';
     const avatar = args.avatar || 'Aibek';
     const background = args.background || 'green';
-    const serverUrl = args.url || 'http://localhost:5173/headless-renderer.html';
+    const serverUrl = args.url || 'http://localhost:3003/avatar/current/embed.html';
     const width = parseInt(args.width) || 1280;
     const height = parseInt(args.height) || 720;
 
@@ -82,16 +84,24 @@ Options:
         // Set viewport
         await page.setViewport({ width, height });
 
-        console.log(`[Headless] Navigating to renderer...`);
+        console.log(`[Headless] Navigating to the mirrored avatar page...`);
         try {
             await page.goto(serverUrl, { waitUntil: 'networkidle0', timeout: 30000 });
         } catch (e) {
-            throw new Error(`Failed to reach ${serverUrl}. Make sure your dev server is running (npm run dev).`);
+            throw new Error(`Failed to reach ${serverUrl}. Make sure the render server is running (node src/server/index.js).`);
         }
 
-        // Wait for the renderer to be ready
+        // Inject our video pipeline into the avatar's own page.
+        const muxerPath = path.join(__dirname, '../../node_modules/webm-muxer/build/webm-muxer.js');
+        if (fs.existsSync(muxerPath)) {
+            await page.addScriptTag({ path: muxerPath });
+        } else {
+            await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/webm-muxer@5.0.2/build/webm-muxer.js' });
+        }
+        await page.addScriptTag({ path: path.join(__dirname, 'inject-renderer.js') });
+
         console.log(`[Headless] Waiting for renderer ready state...`);
-        await page.waitForFunction(() => window.rendererLoaded === true, { timeout: 10000 });
+        await page.waitForFunction(() => window.headlessRendererReady === true, { timeout: 30000 });
 
         console.log(`[Headless] Triggering animation and recording...`);
         const dataUrl = await page.evaluate(async (config) => {

@@ -1,16 +1,12 @@
 services:
+  # Static video-generator UI (nginx). Serves the site root and proxies the
+  # renderer's API. No avatar code is built into this image any more.
   avatar-widget:
     build:
       context: .
-      args:
-        VITE_API_URL: ${VITE_API_URL:-/api/v1}
-        VITE_API_KEY: ${VITE_API_KEY:-sbk_XUQqK17Ui7Gqqe9myqm0S0HGfL52rUWv01KiQMg56S0}
-        VITE_LANGUAGE_ID: ${VITE_LANGUAGE_ID:-kz_KSL}
     ports:
       - "5173:80"
     environment:
-      # Backend URL for API proxy (signBridgeStorage)
-      - BACKEND_URL=${BACKEND_URL:-http://94.131.83.85:8000}
       # Internal URL for video renderer
       - RENDERER_URL=http://avatar-renderer:3003
 
@@ -20,22 +16,37 @@ services:
 
     restart: always
 
+  # Video renderer: puppeteer + WebGL on this box's GPU. It also serves the
+  # avatar mirror, so rendering never touches the avatar's product server.
   avatar-renderer:
     build:
       context: .
       dockerfile: Dockerfile.renderer
+    # Порт наружу НЕ публикуем: nginx ходит по внутренней docker-сети, а на
+    # 3003 висят /admin и прокси с нашим API-ключом. Для доступа с машины —
+    # ssh -L 3003:127.0.0.1:3003
     ports:
-      - "3003:3003"
+      - "127.0.0.1:3003:3003"
     environment:
-      # URL where renderer can reach the static files
-      - APP_URL=http://avatar-widget:80
-      # Backend API for server-side render planning
-      - RENDER_PLAN_API_URL=${BACKEND_URL:-http://94.131.83.85:8000}/api/v1
-      - RENDER_PLAN_API_KEY=${VITE_API_KEY:-sbk_XUQqK17Ui7Gqqe9myqm0S0HGfL52rUWv01KiQMg56S0}
-      - RENDER_PLAN_LANGUAGE_ID=${VITE_LANGUAGE_ID:-kz_KSL}
+      # Where the avatar build is published. Read only while syncing the mirror,
+      # never during a render.
+      - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
+      # Our client key for the avatar gateway (translate + CMS lookups).
+      - AVATAR_API_KEY=${AVATAR_API_KEY:?set AVATAR_API_KEY in .env}
+      # VRMA downloads go straight to storage, bypassing the product server.
+      - AVATAR_FILES_URL=${AVATAR_FILES_URL:-http://94.131.83.85:8000}
+      - RENDER_PLAN_LANGUAGE_ID=${RENDER_PLAN_LANGUAGE_ID:-KSL}
+      # Optional: refresh the avatar mirror automatically (min 60000 ms).
+      # Every refresh is smoke-tested before it goes live.
+      - AVATAR_SYNC_INTERVAL_MS=${AVATAR_SYNC_INTERVAL_MS:-}
+      # Нужен только если админку дёргают не с localhost.
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
     volumes:
-      - ./sessions.json:/app/sessions.json
       - ./video_cache:/app/video_cache
       - ./temp_videos:/app/temp_videos
+      # data/ хранит api_keys.json и sessions.json — только каталог,
+      # монтировать отдельные файлы нельзя (docker создаст каталог).
       - ./data:/app/data
+      # The mirrored avatar build survives container rebuilds.
+      - ./avatar_mirror:/app/avatar_mirror
     restart: always
