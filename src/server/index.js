@@ -160,6 +160,13 @@ const tasks = new Map();
 
 const MAX_CACHE_SIZE = 100 * 1024 * 1024; // 100 MB
 
+// Пауза записи и хвост в конце. Потолок — защита от опечатки: пауза в тысячу
+// секунд молча съела бы таймаут рендера и вернула бы ошибку вместо видео.
+const MAX_PAUSE_SECONDS = 30;
+// Столько же, сколько было зашито в inject-renderer до параметризации, чтобы
+// клиенты без tail_seconds получали ровно прежнее видео.
+const DEFAULT_TAIL_SECONDS = 2;
+
 /**
  * Per-gloss playback data from a caller that already did its own glossing
  * (the speech-to-avatar case).
@@ -168,8 +175,16 @@ const MAX_CACHE_SIZE = 100 * 1024 * 1024; // 100 MB
  *                     lips speak the word: "БАРУ" is signed, "барады" is spoken.
  *   speeds[i]       — timeScale multiplier for animation i, so a gesture can be
  *                     stretched or compressed to fit an external timeline.
+ *   pauses[i]       — seconds of silence to hold AFTER gloss i, replacing the
+ *                     avatar's usual inter-gesture gap. The caller's recording
+ *                     has real pauses in it; without them every sentence after
+ *                     the first drifts ahead of the speech, and an hour-long
+ *                     lecture carries over a hundred of them. Unlike speeds,
+ *                     a pause is the length of the RECORDING, so it is not
+ *                     divided by the gesture rate.
  *
- * Both are positional and must line up with the sequence the backend returns.
+ * All three are positional and must line up with the sequence the backend
+ * returns.
  * The avatar drops tokens entirely on a length mismatch (a desynchronised
  * mouth is worse than a gloss-shaped one), so we check it here and say so
  * instead of letting it fail quietly.
@@ -190,7 +205,24 @@ function normalizePlaybackHints(body) {
         })
         : [];
 
-    return { tokens, speeds, alreadyGlossed: body?.already_glossed === true };
+    const pauses = Array.isArray(body?.pauses)
+        ? body.pauses.map(v => {
+            const n = Number(v);
+            // Отрицательная и мусорная пауза — это 0: «нет паузы», а не сдвиг
+            // назад. Верхняя граница отсекает опечатку в тысячу секунд, которая
+            // молча съела бы таймаут рендера.
+            return Number.isFinite(n) && n > 0 ? Math.min(n, MAX_PAUSE_SECONDS) : 0;
+        })
+        : [];
+
+    // Хвост записи после последнего жеста. По умолчанию столько же, сколько
+    // было зашито в inject-renderer, — поведение прежних клиентов не меняется.
+    const rawTail = Number(body?.tail_seconds);
+    const tailSeconds = Number.isFinite(rawTail) && rawTail >= 0
+        ? Math.min(rawTail, MAX_PAUSE_SECONDS)
+        : DEFAULT_TAIL_SECONDS;
+
+    return { tokens, speeds, pauses, tailSeconds, alreadyGlossed: body?.already_glossed === true };
 }
 
 /**
@@ -209,6 +241,10 @@ function getCacheKey(config) {
         alreadyGlossed: config.alreadyGlossed === true,
         tokens: config.tokens?.length ? config.tokens.map(t => t.word) : null,
         speeds: config.speeds?.length ? config.speeds : null,
+        // Те же глоссы с другими паузами — другое видео, и отдать прежний файл
+        // значит вернуть рассинхрон, за которым клиент и пришёл.
+        pauses: config.pauses?.length ? config.pauses : null,
+        tailSeconds: config.tailSeconds ?? null,
     });
     return crypto.createHash('md5').update(str).digest('hex');
 }
@@ -511,6 +547,11 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                     // hands sign the gloss; speeds[i] scales that gesture.
                     tokens: planning.tokens || [],
                     speeds: planning.speeds || [],
+                    // pauses[i] — тишина ПОСЛЕ жеста i, не делится на rate.
+                    pauses: planning.pauses || [],
+                    tailSeconds: typeof planning.tailSeconds === 'number'
+                        ? planning.tailSeconds
+                        : DEFAULT_TAIL_SECONDS,
                     renderProfile: { hasGPU, encoderMaxQueueSize }
                 }),
                 new Promise((_, reject) => {
@@ -687,6 +728,9 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
     }
     if (hints.speeds.length && sequenceLength !== null && hints.speeds.length !== sequenceLength) {
         hintWarnings.push(`speeds: got ${hints.speeds.length} for ${sequenceLength} glosses — missing entries default to 1`);
+    }
+    if (hints.pauses.length && sequenceLength !== null && hints.pauses.length !== sequenceLength) {
+        hintWarnings.push(`pauses: got ${hints.pauses.length} for ${sequenceLength} glosses — missing entries fall back to the usual gap`);
     }
     if (hintWarnings.length) console.warn(`[Server] Playback hints mismatch — ${hintWarnings.join('; ')}`);
     const renderPreview = renderPlan ? renderPlanToGlossPreview(renderPlan) : null;
