@@ -389,10 +389,17 @@
             //    Both are positional; the avatar ignores tokens if the count does
             //    not match the sequence, which the server checks and reports.
             const languageId = (renderPlan && renderPlan.languageId) || config.languageId || undefined;
+            //
+            //    pauses[i] — тишина записи ПОСЛЕ жеста i, в секундах. Заменяет
+            //    обычный зазор и НЕ делится на rate: это длительность речи, а
+            //    не анимации. Без неё всё после первой паузы уезжает вперёд
+            //    относительно оригинала, ради синхронизации с которым и
+            //    зовут этот рендер.
             const speeds = Array.isArray(config.speeds) ? config.speeds : [];
             const tokens = Array.isArray(config.tokens) ? config.tokens : [];
+            const pauses = Array.isArray(config.pauses) ? config.pauses : [];
             if (response) {
-                await widget.playTranslateResponse(response, preloadedUrls, languageId, speeds, tokens);
+                await widget.playTranslateResponse(response, preloadedUrls, languageId, speeds, tokens, { pauses });
             } else {
                 console.warn('[Headless] Nothing to play from the API — speaking the raw text.');
                 await widget.processTextSelection(text);
@@ -401,10 +408,18 @@
             // 6. Stop recording
             reportProgress(80, 'Финальные вычисления нейросети...');
 
-            // Small buffer inside virtual time so hands can smoothly lower
+            // Хвост записи после последнего жеста: руки опускаются за
+            // REST_POSE_FADE_DURATION (0.5 с), остальное — запас. Раньше здесь
+            // стояли зашитые 2000 мс, и на нарезке лекции кусками каждый кусок
+            // забирал их целиком независимо от того, сколько тишины в записи
+            // после него на самом деле. Значение по умолчанию прежнее, так что
+            // клиенты без tail_seconds получают тот же файл.
+            const tailMs = Number.isFinite(Number(config.tailSeconds))
+                ? Math.max(0, Number(config.tailSeconds) * 1000)
+                : 2000;
             pendingTimeouts.push({
                 id: ++rafIdx,
-                fireAt: virtualTime + 2000,
+                fireAt: virtualTime + tailMs,
                 cb: () => { isEncoding = false; },
             });
 
