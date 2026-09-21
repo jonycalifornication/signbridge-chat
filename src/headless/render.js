@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
+import { resolveFrameSize } from './frame-size.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -10,6 +11,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  * Headless Render CLI
  * Usage: node render.js --glosses="alaqan hello" --output="output.webm" --avatar="Aibek" --background="green"
  */
+
+const FRAME = resolveFrameSize();
 
 async function run() {
     const args = process.argv.slice(2).reduce((acc, arg) => {
@@ -27,8 +30,8 @@ Options:
   --avatar="Name"          Avatar name from config (default: "Aibek")
   --background="color"     Background color or "green"/"transparent" (default: "green")
   --url="http://..."       Mirrored avatar page (default: "http://localhost:3003/avatar/current/embed.html")
-  --width=1280             Viewport width (default: 1280)
-  --height=720             Viewport height (default: 720)
+  --width=N                Frame width (default: ${FRAME.width})
+  --height=N               Frame height (default: ${FRAME.height})
 
 Requires the render server to be running, since it serves the avatar mirror.
         `);
@@ -40,8 +43,9 @@ Requires the render server to be running, since it serves the avatar mirror.
     const avatar = args.avatar || 'Aibek';
     const background = args.background || 'green';
     const serverUrl = args.url || 'http://localhost:3003/avatar/current/embed.html';
-    const width = parseInt(args.width) || 1280;
-    const height = parseInt(args.height) || 720;
+    // Тот же кадр, что у сервера: ширина рассчитана на разведённые руки.
+    const width = parseInt(args.width) || FRAME.width;
+    const height = parseInt(args.height) || FRAME.height;
 
     console.log(`[Headless] Starting render process...`);
     console.log(`[Headless] Glosses: ${glosses.join(', ')}`);

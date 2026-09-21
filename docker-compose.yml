@@ -36,6 +36,10 @@ services:
       # VRMA downloads go straight to storage, bypassing the product server.
       - AVATAR_FILES_URL=${AVATAR_FILES_URL:-http://94.131.83.85:8000}
       - RENDER_PLAN_LANGUAGE_ID=${RENDER_PLAN_LANGUAGE_ID:-KSL}
+      # Кадр видео. Пусто — дефолт 1280x1024: шире роста аватара, чтобы
+      # разведённые в стороны руки не срезало краем.
+      - RENDER_WIDTH=${RENDER_WIDTH:-}
+      - RENDER_HEIGHT=${RENDER_HEIGHT:-}
       # Optional: refresh the avatar mirror automatically (min 60000 ms).
       # Every refresh is smoke-tested before it goes live.
       - AVATAR_SYNC_INTERVAL_MS=${AVATAR_SYNC_INTERVAL_MS:-}

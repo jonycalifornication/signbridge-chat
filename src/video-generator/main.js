@@ -852,6 +852,17 @@ function renderVideoToBubble(bubble, url, preserveGlossPreview, durationSec) {
     ` + timeHtml;
     // Speed control listeners
     const video = bubble.querySelector('video');
+    // Кадр не обязан совпадать с --video-aspect: размер рендера мог быть
+    // переопределён через env, а из кэша может приехать видео прежней,
+    // узкой пропорции. Подгоняем контейнер под то, что реально пришло.
+    const videoContainer = bubble.querySelector('.video-container');
+    if (video && videoContainer) {
+        video.addEventListener('loadedmetadata', () => {
+            if (video.videoWidth && video.videoHeight) {
+                videoContainer.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+            }
+        });
+    }
     bubble.querySelectorAll('.speed-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             bubble.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));

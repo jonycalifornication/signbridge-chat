@@ -15,6 +15,7 @@ import {
     estimateRenderTimeoutMs,
     renderPlanToGlossPreview
 } from '../headless/render-plan.js';
+import { resolveFrameSize } from '../headless/frame-size.js';
 import { validateRequest, getAllKeys, createKey, deleteKey } from './api-keys.js';
 import {
     AVATAR_URL,
@@ -167,6 +168,10 @@ const MAX_PAUSE_SECONDS = 30;
 // клиенты без tail_seconds получали ровно прежнее видео.
 const DEFAULT_TAIL_SECONDS = 2;
 
+// Кадр видео. Ширина — не косметика: в неё упираются разведённые руки, и
+// обрезанный жест читается неправильно. См. src/headless/frame-size.js.
+const FRAME = resolveFrameSize();
+
 /**
  * Per-gloss playback data from a caller that already did its own glossing
  * (the speech-to-avatar case).
@@ -245,6 +250,9 @@ function getCacheKey(config) {
         // значит вернуть рассинхрон, за которым клиент и пришёл.
         pauses: config.pauses?.length ? config.pauses : null,
         tailSeconds: config.tailSeconds ?? null,
+        // Кадр другого размера — другое видео. Без этого после смены ширины
+        // на старый текст вернулся бы старый, узкий файл из кэша.
+        frame: `${FRAME.width}x${FRAME.height}`,
     });
     return crypto.createHash('md5').update(str).digest('hex');
 }
@@ -498,7 +506,8 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
         
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
         
-        await page.setViewport({ width: 768, height: 1024 });
+        console.log(`[Server] Frame: ${FRAME.width}x${FRAME.height}`);
+        await page.setViewport({ width: FRAME.width, height: FRAME.height });
 
         page.on('console', msg => console.log(`[Browser Console] ${msg.type().toUpperCase()}: ${msg.text()}`));
         page.on('pageerror', err => console.error(`[Browser Error] ${err.message}`));
