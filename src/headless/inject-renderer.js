@@ -39,6 +39,15 @@
     const MAX_NETWORK_HOLD_MS = 5000;
     const MAX_TOTAL_NETWORK_HOLD_MS = 60000;
 
+    /**
+     * Сколько ждать первого кадра от виджета, прежде чем начать запись.
+     *
+     * Виджет рисует по rAF, то есть раз в ~16 мс; секунда — это шестьдесят его
+     * тиков. Не уложился — значит его цикл не идёт вовсе, и ждать дальше
+     * бессмысленно.
+     */
+    const FIRST_FRAME_WAIT_MS = 1000;
+
     // Captured before any hijacking so our own waiting is never virtualised.
     const nativeSetTimeout = window.setTimeout.bind(window);
     const nativeDateNow = Date.now.bind(Date);
@@ -319,6 +328,37 @@
                 }
                 return settled.finally(() => { pendingNetwork--; });
             };
+
+            // Первые кадры писались ЧЁРНЫМИ, и вот почему.
+            //
+            // Свой кадр виджет рисует из собственного rAF-колбэка. Он
+            // зарегистрировал его ДО перехвата, поэтому наш `rafCb` пуст, пока
+            // виджет не дойдёт до следующего тика и не перерегистрируется уже
+            // через нашу подмену. Все витки цикла до этого момента ничего не
+            // рисуют — а снимают.
+            //
+            // Снять в такой момент нечего: холст виджета создан без
+            // `preserveDrawingBuffer` (см. widget/index.js; в студийном
+            // рендерере он включён явно как раз потому, что та снимает кадры),
+            // и буфер, прочитанный вне только что отрисованного кадра, отдаёт
+            // чёрное. Отсюда чёрная заставка в начале каждого видео.
+            //
+            // Ждём реального тика виджета, чтобы цикл стартовал с живым
+            // колбэком. Ждём ОГРАНИЧЕННО: не дождались — идём как раньше,
+            // чёрный кадр лучше зависшего рендера.
+            let waitedForFirstFrame = 0;
+            while (rafCb === null && waitedForFirstFrame < FIRST_FRAME_WAIT_MS) {
+                await realSleep(16);
+                waitedForFirstFrame += 16;
+            }
+            if (rafCb === null) {
+                console.warn(
+                    `[Headless] Widget did not re-register rAF in ${FIRST_FRAME_WAIT_MS} ms —` +
+                    ' the first frames may come out black',
+                );
+            } else {
+                console.log(`[Headless] First frame ready after ${waitedForFirstFrame} ms`);
+            }
 
             // Background deterministic loop
             const encodingPromise = (async () => {
