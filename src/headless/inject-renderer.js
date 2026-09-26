@@ -248,6 +248,18 @@
         const encWidth = window.innerWidth;
         const encHeight = window.innerHeight;
 
+        // Субтитры. Без параметра `subtitles` фабрика отдаёт null, и кадр идёт
+        // в кодек ровно как раньше — ни лишнего холста, ни лишней копии.
+        const subtitles = window.HeadlessSubtitles
+            ? window.HeadlessSubtitles.create({
+                mode: config.subtitles,
+                glosses,
+                tokens: config.tokens,
+                width: encWidth,
+                height: encHeight,
+            })
+            : null;
+
         const muxer = new window.WebMMuxer.Muxer({
             target: new window.WebMMuxer.ArrayBufferTarget(),
             video: {
@@ -279,6 +291,11 @@
         const originalPerfNow = performance.now;
         const originalFetch = window.fetch;
         const originalClockDelta = widget.clock ? widget.clock.getDelta : null;
+        // Какой жест идёт сейчас, знает только сам аватар, и говорит он об этом
+        // наружу — `postToParent`. В рендере родительского окна нет, и событие
+        // не уходит никуда; перехватываем на месте. Тем же приёмом, что время и
+        // сеть выше: страница чужая, и трогаем мы её только на время записи.
+        const originalPostToParent = subtitles ? widget.postToParent : null;
 
         let virtualTime = 0;
         const pendingTimeouts = [];
@@ -291,6 +308,13 @@
         console.log(`[Headless] Encoder backpressure queue limit: ${maxEncoderQueueSize}`);
 
         try {
+            if (subtitles) {
+                widget.postToParent = function (message) {
+                    try { subtitles.note(message); } catch (e) { /* подпись не стоит кадра */ }
+                    return originalPostToParent.call(this, message);
+                };
+            }
+
             window.setTimeout = (cb, delay) => {
                 const id = ++rafIdx;
                 pendingTimeouts.push({ id, cb, fireAt: virtualTime + (delay || 0) });
@@ -400,7 +424,11 @@
 
                     if (isEncoding) {
                         const bitmap = await createImageBitmap(widget.renderer.domElement);
-                        const frame = new VideoFrame(bitmap, { timestamp: (frameCount * 1_000_000) / FRAMERATE });
+                        let source = bitmap;
+                        if (subtitles) {
+                            try { source = subtitles.compose(bitmap); } catch (e) { source = bitmap; }
+                        }
+                        const frame = new VideoFrame(source, { timestamp: (frameCount * 1_000_000) / FRAMERATE });
                         videoEncoder.encode(frame, { keyFrame: frameCount % 30 === 0 });
                         frame.close();
                         bitmap.close();
@@ -438,6 +466,29 @@
             const speeds = Array.isArray(config.speeds) ? config.speeds : [];
             const tokens = Array.isArray(config.tokens) ? config.tokens : [];
             const pauses = Array.isArray(config.pauses) ? config.pauses : [];
+
+            // Тишина ДО первого жеста. Пауза в записи бывает и до первого
+            // предложения — лектор молчит, пока включается проектор, — и без
+            // неё видео начинается с жеста, а речь в оригинале через четыре
+            // секунды: файл смещён с первого кадра, и ручной подгонкой в
+            // монтаже это чинить бессмысленно, когда число известно точно.
+            //
+            // Ждём по ВИРТУАЛЬНОМУ времени, тем же механизмом, что хвост:
+            // кадры всё это время пишутся, и аватар в них стоит в позе покоя —
+            // ровно то, что происходит в записи, пока никто не говорит.
+            const leadMs = Number.isFinite(Number(config.leadSeconds))
+                ? Math.max(0, Number(config.leadSeconds) * 1000)
+                : 0;
+            if (leadMs > 0) {
+                await new Promise((resolve) => {
+                    pendingTimeouts.push({
+                        id: ++rafIdx,
+                        fireAt: virtualTime + leadMs,
+                        cb: resolve,
+                    });
+                });
+            }
+
             if (response) {
                 await widget.playTranslateResponse(response, preloadedUrls, languageId, speeds, tokens, { pauses });
             } else {
@@ -473,6 +524,7 @@
             isEncoding = false;
             pendingTimeouts.length = 0;
             // Always restore native APIs
+            if (originalPostToParent) widget.postToParent = originalPostToParent;
             window.setTimeout = originalSetTimeout;
             window.clearTimeout = originalClearTimeout;
             window.requestAnimationFrame = originalRAF;

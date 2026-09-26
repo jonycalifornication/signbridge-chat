@@ -102,6 +102,7 @@ Requires the render server to be running, since it serves the avatar mirror.
         } else {
             await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/webm-muxer@5.0.2/build/webm-muxer.js' });
         }
+        await page.addScriptTag({ path: path.join(__dirname, 'subtitles.js') });
         await page.addScriptTag({ path: path.join(__dirname, 'inject-renderer.js') });
 
         console.log(`[Headless] Waiting for renderer ready state...`);

@@ -28,6 +28,9 @@ RUN apt-get update && apt-get install -y \
     libvulkan1 \
     # FFmpeg with NVENC support
     ffmpeg \
+    # Шрифт для субтитров на кадре. В slim-образе системных шрифтов нет вовсе,
+    # и chromium рисует подпись квадратами; DejaVu покрывает и казахские буквы.
+    fonts-dejavu-core \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
