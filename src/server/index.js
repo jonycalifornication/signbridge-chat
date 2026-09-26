@@ -227,7 +227,32 @@ function normalizePlaybackHints(body) {
         ? Math.min(rawTail, MAX_PAUSE_SECONDS)
         : DEFAULT_TAIL_SECONDS;
 
-    return { tokens, speeds, pauses, tailSeconds, alreadyGlossed: body?.already_glossed === true };
+    // Тишина ПЕРЕД первым жестом. Пауз в записи бывает и до первого
+    // предложения: лектор молчит, пока включается проектор. Без неё видео
+    // начинается с жеста, а речь — через четыре секунды, и весь файл смещён
+    // относительно оригинала с первого кадра. Умолчание 0: прежние клиенты
+    // получают прежнее видео.
+    const rawLead = Number(body?.lead_seconds);
+    const leadSeconds = Number.isFinite(rawLead) && rawLead > 0
+        ? Math.min(rawLead, MAX_PAUSE_SECONDS)
+        : 0;
+
+    // Субтитры: 'glosses' — подпись жестом, 'text' — оригинальным словом.
+    // Умолчание — никаких: подпись меняет картинку, и включать её без спроса
+    // значило бы отдать другому клиенту не то видео, за которым он пришёл.
+    const subtitles = body?.subtitles === 'glosses' || body?.subtitles === 'text'
+        ? body.subtitles
+        : null;
+
+    return {
+        tokens,
+        speeds,
+        pauses,
+        leadSeconds,
+        tailSeconds,
+        subtitles,
+        alreadyGlossed: body?.already_glossed === true,
+    };
 }
 
 /**
@@ -249,10 +274,14 @@ function getCacheKey(config) {
         // Те же глоссы с другими паузами — другое видео, и отдать прежний файл
         // значит вернуть рассинхрон, за которым клиент и пришёл.
         pauses: config.pauses?.length ? config.pauses : null,
+        leadSeconds: config.leadSeconds ?? null,
         tailSeconds: config.tailSeconds ?? null,
         // Кадр другого размера — другое видео. Без этого после смены ширины
         // на старый текст вернулся бы старый, узкий файл из кэша.
         frame: `${FRAME.width}x${FRAME.height}`,
+        // Подпись на кадре — часть картинки: то же видео без неё это другой
+        // файл, и отдать его из кэша значит отдать не то, о чём просили.
+        subtitles: config.subtitles ?? null,
     });
     return crypto.createHash('md5').update(str).digest('hex');
 }
@@ -420,6 +449,7 @@ async function apiKeyAuth(req, res, next) {
 const MUXER_LOCAL_PATH = path.join(__dirname, '../../node_modules/webm-muxer/build/webm-muxer.js');
 const MUXER_CDN_URL = 'https://cdn.jsdelivr.net/npm/webm-muxer@5.0.2/build/webm-muxer.js';
 const INJECT_RENDERER_PATH = path.join(__dirname, '../headless/inject-renderer.js');
+const SUBTITLES_PATH = path.join(__dirname, '../headless/subtitles.js');
 
 /**
  * Put our video pipeline inside the avatar's page.
@@ -437,6 +467,9 @@ async function injectRenderer(page) {
         await page.addScriptTag({ url: MUXER_CDN_URL });
     }
 
+    // Субтитры лежат отдельным файлом, а не внутри рендера: так их можно
+    // прогнать и посмотреть глазами, не запуская рендер целиком.
+    await page.addScriptTag({ path: SUBTITLES_PATH });
     await page.addScriptTag({ path: INJECT_RENDERER_PATH });
 }
 
@@ -558,9 +591,12 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                     speeds: planning.speeds || [],
                     // pauses[i] — тишина ПОСЛЕ жеста i, не делится на rate.
                     pauses: planning.pauses || [],
+                    // Тишина до первого жеста — тем же механизмом, что хвост.
+                    leadSeconds: typeof planning.leadSeconds === 'number' ? planning.leadSeconds : 0,
                     tailSeconds: typeof planning.tailSeconds === 'number'
                         ? planning.tailSeconds
                         : DEFAULT_TAIL_SECONDS,
+                    subtitles: planning.subtitles || null,
                     renderProfile: { hasGPU, encoderMaxQueueSize }
                 }),
                 new Promise((_, reject) => {
