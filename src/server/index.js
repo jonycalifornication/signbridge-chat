@@ -555,6 +555,12 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
             apiUrl: AVATAR_PAGE_API_URL,
             apiKey: AVATAR_API_KEY,
             languageId: process.env.RENDER_PLAN_LANGUAGE_ID || 'KSL',
+            // Просим аватар включить preserveDrawingBuffer: мы снимаем каждый
+            // кадр с холста уже после отрисовки, а без флага содержимое буфера
+            // в этот момент не определено — в видео пропадали целые меши
+            // (пиджак, рукава) на 5% кадров. Обычному просмотру флаг не нужен
+            // и стоит памяти, поэтому его просит только запись.
+            record: '1',
         }).toString()}`;
 
         console.log(`[Server] Navigating to mirrored avatar page: ${mirrorEntryUrl(SELF_URL, mirrorVariant)}`);
