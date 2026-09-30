@@ -213,6 +213,41 @@
         }
     }
 
+    /**
+     * Сколько секунд видео ОЖИДАЕТСЯ — чтобы проценты значили проценты.
+     *
+     * Раньше полоса ползла к 75% логарифмически от числа кадров: после
+     * четырёх минут видео она садилась на 74% и стояла там до конца, сколько
+     * бы ни осталось. Оператор видел «застряло» на нормальном рендере и
+     * дважды перезапускал получасовую работу.
+     *
+     * Считаем по тому, что уже известно: клипы последовательности, их
+     * множители скорости, паузы записи, лид и хвост. Точность тут нужна не
+     * аптекарская — это шкала, а не план; промах в 10% полосу не портит.
+     * Не вышло посчитать (нет последовательности) — возвращаем 0, и полоса
+     * работает по-старому.
+     */
+    function expectedRecordingSeconds(response, config, leadMs, tailMs) {
+        const sequence = Array.isArray(response?.sequence) ? response.sequence : [];
+        if (sequence.length === 0) return 0;
+        const speeds = Array.isArray(config.speeds) ? config.speeds : [];
+        const pauses = Array.isArray(config.pauses) ? config.pauses : [];
+        // Зазор между жестами у проигрывателя (PAUSE_BETWEEN_ANIMATIONS, мс) —
+        // он ускоряется вместе с жестом, а вот пауза записи из pauses[] нет.
+        const GAP_SECONDS = 0.15;
+        let total = (leadMs + tailMs) / 1000;
+        sequence.forEach((item, i) => {
+            const rawRate = Number(speeds[i]);
+            const rate = Number.isFinite(rawRate) && rawRate > 0 ? rawRate : 1;
+            const clip = (Number(item?.duration) || 0) + (Number(item?.duration_2) || 0);
+            total += clip / rate;
+            const pause = Number(pauses[i]);
+            total += Number.isFinite(pause) && pause > 0 ? pause : GAP_SECONDS / rate;
+        });
+        return total;
+    }
+
+
     async function renderToVideo(config) {
         const { glosses, avatar, background, renderPlan, renderProfile } = config;
 
@@ -302,6 +337,9 @@
         let rafIdx = 0;
         let isEncoding = true;
         let frameCount = 0;
+        // Сколько секунд видео ждём — заполняется, когда известна
+        // последовательность (до начала записи). 0 = посчитать не вышло.
+        let expectedSeconds = 0;
         let pendingNetwork = 0;
         let totalHeldMs = 0;
         const maxEncoderQueueSize = resolveEncoderMaxQueueSize(renderProfile);
@@ -447,9 +485,20 @@
                         frameCount++;
 
                         if (frameCount % 60 === 0) {
-                            // Scale progress 50→75 logarithmically so it never truly stalls
-                            const renderPct = 50 + 25 * (1 - 1 / (1 + frameCount / 300));
-                            reportProgress(Math.round(renderPct), `Синтезируем движения: кадр ${frameCount} ⚡`);
+                            const done = frameCount / FRAMERATE;
+                            if (expectedSeconds > 0) {
+                                // Доля записанного, зажатая в полосу 50→75.
+                                const share = Math.min(1, done / expectedSeconds);
+                                reportProgress(
+                                    Math.round(50 + 25 * share),
+                                    `Синтезируем движения: ${done.toFixed(0)} с из ${expectedSeconds.toFixed(0)} ⚡`,
+                                );
+                            } else {
+                                // Последовательности нет — прежняя логарифмическая
+                                // шкала: врёт, зато никогда не упирается в 100%.
+                                const renderPct = 50 + 25 * (1 - 1 / (1 + frameCount / 300));
+                                reportProgress(Math.round(renderPct), `Синтезируем движения: кадр ${frameCount} ⚡`);
+                            }
                         }
                     }
 
@@ -491,6 +540,11 @@
             const leadMs = Number.isFinite(Number(config.leadSeconds))
                 ? Math.max(0, Number(config.leadSeconds) * 1000)
                 : 0;
+            const tailMsForEstimate = Number.isFinite(Number(config.tailSeconds))
+                ? Math.max(0, Number(config.tailSeconds) * 1000)
+                : 2000;
+            expectedSeconds = expectedRecordingSeconds(response, config, leadMs, tailMsForEstimate);
+            console.log(`[Headless] Ожидаемая длительность записи: ${expectedSeconds.toFixed(1)} с`);
             if (leadMs > 0) {
                 await new Promise((resolve) => {
                     pendingTimeouts.push({
