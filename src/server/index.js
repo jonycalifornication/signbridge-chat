@@ -3,19 +3,20 @@ import './load-env.js'; // must stay first: modules below read config at import 
 import express from 'express';
 import cors from 'cors';
 import puppeteer from 'puppeteer';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import os from 'os';
 import {
     buildRenderPlan,
     estimateFallbackTimeoutMs,
     estimateRenderTimeoutMs,
     renderPlanToGlossPreview
 } from '../headless/render-plan.js';
-import { resolveFrameSize } from '../headless/frame-size.js';
+import { resolveFrameSize, SUBTITLE_STRIP_HEIGHT } from '../headless/frame-size.js';
 import { validateRequest, getAllKeys, createKey, deleteKey } from './api-keys.js';
 import {
     AVATAR_URL,
@@ -1001,6 +1002,9 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
     tasks.set(taskId, {
         ...tasks.get(taskId),
         requestBody: req.body,
+        // Были ли субтитры — нужно на выдаче: копию без подписи просят у той же
+        // задачи, и срезать полосу можно только у того, у кого она есть.
+        subtitles: hints.subtitles || null,
         status: 'processing',
         progress: 0,
         message: 'Задача создана...',
@@ -1252,27 +1256,111 @@ async function cleanupTask(taskId) {
         if (task.otherFilePath && task.otherFilePath.includes(TEMP_DIR) && fs.existsSync(task.otherFilePath)) {
             await fs.promises.unlink(task.otherFilePath);
         }
+        // Копия без подписи — такой же временный файл.
+        if (task.cleanFilePath && task.cleanFilePath.includes(TEMP_DIR) && fs.existsSync(task.cleanFilePath)) {
+            await fs.promises.unlink(task.cleanFilePath);
+        }
     } catch(e) { console.error('Cleanup error:', e); }
     tasks.delete(taskId);
 }
 
 
 /**
+ * Битрейт копии без подписи. Тот же, с которым пишет энкодер страницы
+ * (`videoEncoder.configure` в `src/headless/inject-renderer.js`): копия должна
+ * отличаться от оригинала ровно срезанной полосой, а не качеством.
+ */
+const CLEAN_COPY_BITRATE = '5M';
+
+/** Запустить ffmpeg и дождаться. Наружу — последние строки stderr: без них
+ *  «ffmpeg exited 1» не говорит ничего. */
+function runFfmpeg(args) {
+    return new Promise((resolve, reject) => {
+        const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+        // Пережим не должен отбирать процессор у рендеров: кадры им снимает
+        // тот же CPU, и подвинуть их ради копии значило бы растянуть очередь.
+        try { os.setPriority(proc.pid, 10); } catch { /* не дали — не страшно */ }
+        let tail = '';
+        proc.stderr.on('data', (chunk) => { tail = (tail + chunk).slice(-2000); });
+        proc.on('error', reject);
+        proc.on('close', (code) => {
+            if (code === 0) resolve();
+            else reject(new Error(`ffmpeg exited ${code}: ${tail.trim()}`));
+        });
+    });
+}
+
+/**
+ * Копия этого же куска без подписи — та же картинка, у которой срезана верхняя
+ * полоса субтитров.
+ *
+ * Зачем на сервере. Подпись вжигается в кадр, а в монтаж нужен тот же кусок
+ * чистым. Отрендерить его заново — это ещё раз та же карта и те же минуты;
+ * срезать полосу стоит одного пережима на CPU: замер на куске в 20 с — 3.1 с,
+ * то есть пятиминутный отрезок режется примерно за 45 с, мимо очереди
+ * рендеров и мимо GPU.
+ *
+ * Пережим честный: VP8 обрезать без него нельзя. Теряется одно поколение,
+ * битрейт берём тот же, что у рендера.
+ *
+ * Считается ПО ТРЕБОВАНИЮ и один раз на задачу: пока копию не попросили, она
+ * ничего не стоит, а два одновременных запроса ждут один и тот же пережим,
+ * а не запускают два ffmpeg на один файл.
+ */
+function cleanCopy(task) {
+    if (task.cleanCopyPromise) return task.cleanCopyPromise;
+    const source = task.finalFilePath;
+    const target = source.replace(/\.(webm|mp4)$/, '.clean.$1');
+    const webm = source.endsWith('.webm');
+    task.cleanCopyPromise = (async () => {
+        if (!fs.existsSync(target)) {
+            const started = Date.now();
+            await runFfmpeg([
+                '-y', '-i', source,
+                '-vf', `crop=iw:ih-${SUBTITLE_STRIP_HEIGHT}:0:${SUBTITLE_STRIP_HEIGHT}`,
+                '-c:v', webm ? 'libvpx' : 'libx264',
+                ...(webm ? ['-b:v', CLEAN_COPY_BITRATE] : ['-crf', '20']),
+                // Потоков меньше, чем ядер: рядом идут рендеры.
+                '-threads', '4',
+                '-an', target,
+            ]);
+            console.log(`[Clean] ${path.basename(target)} за ${((Date.now() - started) / 1000).toFixed(1)} с`);
+        }
+        task.cleanFilePath = target;
+        return target;
+    })().catch((err) => {
+        // Следующая попытка начинается заново: половина файла на диске хуже,
+        // чем его отсутствие.
+        task.cleanCopyPromise = null;
+        fs.promises.unlink(target).catch(() => {});
+        throw err;
+    });
+    return task.cleanCopyPromise;
+}
+
+/**
  * v2: Final Download Endpoint 
+ *
+ * `?subtitles=0` — тот же кусок без подписи. У задачи без субтитров это просто
+ * тот же файл: резать нечего, и отдать его молча честнее, чем 400 за лишний
+ * параметр, — клиенту тогда не надо помнить, с подписью он рендерил или нет.
  */
 app.get('/api/v1/video/download/:taskId', async (req, res) => {
     const taskId = req.params.taskId;
     const task = tasks.get(taskId);
+    // Запрос мог прийти к любому воркеру, а файл лежит у хозяина — запрос
+    // уезжает к нему ВМЕСТЕ с параметрами, иначе сосед отдал бы подписанный.
+    const query = req.originalUrl.includes('?') ? `?${req.originalUrl.split('?')[1]}` : '';
 
     if (task?.movedTo) {
-        return pipeFromOwner(req, res, `${task.movedTo.base}/api/v1/video/download/${task.movedTo.taskId}`)
+        return pipeFromOwner(req, res, `${task.movedTo.base}/api/v1/video/download/${task.movedTo.taskId}${query}`)
             .catch(() => res.status(502).json({ error: 'owner_unreachable' }));
     }
 
     if (!task) {
         const owner = await ownerOf(taskId);
         if (owner) {
-            return pipeFromOwner(req, res, `${owner}/api/v1/video/download/${taskId}`)
+            return pipeFromOwner(req, res, `${owner}/api/v1/video/download/${taskId}${query}`)
                 .catch(() => res.status(502).json({ error: 'owner_unreachable' }));
         }
     }
@@ -1282,7 +1370,17 @@ app.get('/api/v1/video/download/:taskId', async (req, res) => {
     }
 
     const filename = task.finalFilePath.endsWith('.webm') ? 'animation.webm' : 'animation.mp4';
-    res.download(task.finalFilePath, filename);
+    if (req.query.subtitles !== '0' || !task.subtitles) {
+        return res.download(task.finalFilePath, filename);
+    }
+
+    try {
+        const clean = await cleanCopy(task);
+        res.download(clean, filename);
+    } catch (err) {
+        console.error(`[Clean] Срез подписи не вышел для ${taskId}:`, err.message);
+        res.status(500).json({ error: 'clean_copy_failed' });
+    }
 });
 
 /**
@@ -1700,8 +1798,13 @@ app.post('/api/v1/sessions', async (req, res) => {
 });
 
 
-// Periodic cleanup: keep TEMP_DIR under 500MB (LRU)
-const MAX_TEMP_SIZE = 500 * 1024 * 1024; // 500 MB
+// Periodic cleanup: keep TEMP_DIR under the cap (LRU)
+//
+// Было 500 МБ — меньше, чем одна лекция: кусок на 5 минут весит ~150 МБ, а их
+// бывает четырнадцать, и файл третьего куска исчезал раньше, чем оператор
+// доходил до него за копией без подписи. Задачу всё равно сносит свой час, так
+// что потолок тут — про диск, а не про срок; на боксе его 300 ГБ.
+const MAX_TEMP_SIZE = 20 * 1024 * 1024 * 1024; // 20 GB
 setInterval(async () => {
     try {
         const files = await fs.promises.readdir(TEMP_DIR);
