@@ -886,8 +886,33 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
         }
     }
 
+    // Застолбить место СРАЗУ, до похода за планом рендера.
+    //
+    // План строится сетевым запросом к шлюзу и занимает секунды. Пока он
+    // строился, задачи в списке не было — и следующий запрос видел воркер
+    // свободным и тоже оставался здесь. На четырёх одновременных кусках все
+    // четыре оседали у одного, а три карты простаивали.
+    tasks.set(taskId, {
+        status: 'processing',
+        progress: 0,
+        message: 'Готовим план рендера...',
+        downloadUrl: null,
+        sseResponse: null,
+        msgId,
+        sessionId,
+    });
+
     const hasGPU = hasRendererGPU();
-    const { renderPlan, renderTimeoutMs } = await prepareRenderPlan(glosses, hasGPU, null, mode, hints.alreadyGlossed);
+    let renderPlan;
+    let renderTimeoutMs;
+    try {
+        ({ renderPlan, renderTimeoutMs } = await prepareRenderPlan(glosses, hasGPU, null, mode, hints.alreadyGlossed));
+    } catch (err) {
+        // План не построился — место освобождаем, иначе воркер будет считать
+        // себя занятым до перезапуска.
+        tasks.delete(taskId);
+        throw err;
+    }
 
     // tokens/speeds are positional: the avatar ignores tokens outright when the
     // count differs from the sequence, so tell the caller rather than shipping a
@@ -906,8 +931,9 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
     if (hintWarnings.length) console.warn(`[Server] Playback hints mismatch — ${hintWarnings.join('; ')}`);
     const renderPreview = renderPlan ? renderPlanToGlossPreview(renderPlan) : null;
 
-    // Initialize task
+    // Дополняем застолблённую запись тем, что стало известно из плана.
     tasks.set(taskId, {
+        ...tasks.get(taskId),
         status: 'processing',
         progress: 0,
         message: 'Задача создана...',
