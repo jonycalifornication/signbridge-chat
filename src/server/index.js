@@ -759,14 +759,36 @@ app.post('/api/v1/video/preview', rateLimit, apiKeyAuth, async (req, res) => {
  * v2: Asynchronous Task Creation
  */
 /**
+ * Сколько задач у нас в работе.
+ *
+ * Считаем по списку задач, а не по семафору: слот захватывается ПОЗЖЕ, уже
+ * внутри фоновой работы, и в момент создания следующей задачи семафор ещё
+ * показывает «свободно». На четырёх одновременных запросах это и приводило к
+ * тому, что все четыре оставались у одного воркера.
+ */
+function tasksInFlight() {
+    let n = 0;
+    for (const task of tasks.values()) {
+        if (task.status !== 'completed' && task.status !== 'error') n += 1;
+    }
+    return n;
+}
+
+/** Свободны ли мы прямо сейчас — для себя и для соседей. */
+function workerIsFree() {
+    return renderSemaphore.free && tasksInFlight() < renderSemaphore.max;
+}
+
+/**
  * Свободен ли этот воркер. Спрашивают только соседи, по внутренней сети;
  * nginx наружу /internal не отдаёт.
  */
 app.get('/internal/slots', (_req, res) => {
     res.json({
         worker: WORKER_ID || null,
-        free: renderSemaphore.free,
+        free: workerIsFree(),
         active: renderSemaphore.active,
+        inFlight: tasksInFlight(),
         queued: renderSemaphore.waiting.length,
     });
 });
@@ -814,7 +836,7 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
     // Мы заняты, а сосед свободен — отдаём задачу ему и возвращаем ЕГО номер.
     // Номер несёт префикс воркера, поэтому опрос статуса потом придёт туда же.
     // Заголовок не даёт переданной задаче уехать дальше по кругу.
-    if (!renderSemaphore.free && req.get('X-Render-Handoff') !== '1') {
+    if (!workerIsFree() && req.get('X-Render-Handoff') !== '1') {
         const peer = await findFreePeer();
         if (peer) {
             try {
