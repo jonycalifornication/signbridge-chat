@@ -1271,6 +1271,37 @@ async function cleanupTask(taskId) {
  * отличаться от оригинала ровно срезанной полосой, а не качеством.
  */
 const CLEAN_COPY_BITRATE = '5M';
+/**
+ * Скорость пережима. `cpu-used 4` вместо умолчания libvpx (0) — вдвое быстрее
+ * при той же картинке: замер на боксе, кусок 5.2 с, 6.8 → 4.7 с. Нулевое
+ * умолчание здесь не ради качества, а по недосмотру: оно рассчитано на
+ * архивное кодирование, а мы режем полосу у уже сжатого видео.
+ */
+const CLEAN_COPY_SPEED = ['-deadline', 'good', '-cpu-used', '4'];
+/** Потоков на один ffmpeg. У VP8 их всё равно делят между token-партициями,
+ *  выше восьми прироста нет. */
+const CLEAN_COPY_THREADS = '8';
+/**
+ * На куски какой длины резать перед пережимом и сколько жать разом.
+ *
+ * Один ffmpeg упирается в несколько ядер и всё: у VP8 потоки делятся между
+ * token-партициями. На боксе ядер 112, но Xeon 6238R медленный на поток
+ * (2.2 ГГц), и пятиминутный кусок одним процессом жмётся минутами. Замер на
+ * настоящем куске лекции (300.9 с, тот же бокс):
+ *
+ *   один ffmpeg               202 с
+ *   сегментами параллельно     64 с
+ *
+ * Сегменты режутся БЕЗ перекодировки (`-c copy`) по ключевым кадрам — страница
+ * ставит их раз в секунду, так что граница всегда есть, — жмутся параллельно и
+ * склеиваются тоже без перекодировки; длительность на выходе совпала с
+ * исходной (300.933 против 300.933 у цельного пережима).
+ *
+ * Потолок параллельности не про длину куска, а про то, чтобы не отобрать
+ * машину у рендеров: 8 × 8 потоков это 64 ядра из 112.
+ */
+const CLEAN_COPY_SEGMENT_SECONDS = '40';
+const CLEAN_COPY_PARALLEL = 8;
 
 /** Запустить ffmpeg и дождаться. Наружу — последние строки stderr: без них
  *  «ffmpeg exited 1» не говорит ничего. */
@@ -1315,15 +1346,7 @@ function cleanCopy(task) {
     task.cleanCopyPromise = (async () => {
         if (!fs.existsSync(target)) {
             const started = Date.now();
-            await runFfmpeg([
-                '-y', '-i', source,
-                '-vf', `crop=iw:ih-${SUBTITLE_STRIP_HEIGHT}:0:${SUBTITLE_STRIP_HEIGHT}`,
-                '-c:v', webm ? 'libvpx' : 'libx264',
-                ...(webm ? ['-b:v', CLEAN_COPY_BITRATE] : ['-crf', '20']),
-                // Потоков меньше, чем ядер: рядом идут рендеры.
-                '-threads', '4',
-                '-an', target,
-            ]);
+            await cropOffSubtitles(source, target, webm);
             console.log(`[Clean] ${path.basename(target)} за ${((Date.now() - started) / 1000).toFixed(1)} с`);
         }
         task.cleanFilePath = target;
@@ -1336,6 +1359,63 @@ function cleanCopy(task) {
         throw err;
     });
     return task.cleanCopyPromise;
+}
+
+/** Аргументы одного пережима: срезать полосу и записать в target. */
+function cropArgs(source, target, webm) {
+    return [
+        '-y', '-i', source,
+        '-vf', `crop=iw:ih-${SUBTITLE_STRIP_HEIGHT}:0:${SUBTITLE_STRIP_HEIGHT}`,
+        '-c:v', webm ? 'libvpx' : 'libx264',
+        ...(webm ? ['-b:v', CLEAN_COPY_BITRATE] : ['-crf', '20']),
+        ...CLEAN_COPY_SPEED,
+        '-threads', CLEAN_COPY_THREADS,
+        '-an', target,
+    ];
+}
+
+/**
+ * Срезать полосу субтитров — сегментами и параллельно.
+ *
+ * Нарезка и склейка идут БЕЗ перекодировки, пережимается только середина.
+ * Если нарезка не удалась или сегмент вышел один (кусок короткий), жмём файл
+ * целиком одним проходом: ради десяти секунд видео городить сегменты незачем,
+ * а падать из-за них — тем более.
+ */
+async function cropOffSubtitles(source, target, webm) {
+    const work = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'clean-'));
+    try {
+        const ext = webm ? 'webm' : 'mp4';
+        await runFfmpeg([
+            '-y', '-i', source, '-c', 'copy', '-f', 'segment',
+            '-segment_time', CLEAN_COPY_SEGMENT_SECONDS, '-reset_timestamps', '1',
+            path.join(work, `seg%04d.${ext}`),
+        ]);
+        const segments = (await fs.promises.readdir(work))
+            .filter((name) => name.startsWith('seg') && name.endsWith(`.${ext}`) && !name.includes('.out.'))
+            .sort();
+        if (segments.length < 2) {
+            await runFfmpeg(cropArgs(source, target, webm));
+            return;
+        }
+        const outputs = segments.map((name) => path.join(work, name.replace(`.${ext}`, `.out.${ext}`)));
+        const queue = segments.map((name, i) => ({ from: path.join(work, name), to: outputs[i] }));
+        const worker = async () => {
+            for (;;) {
+                const job = queue.shift();
+                if (!job) return;
+                await runFfmpeg(cropArgs(job.from, job.to, webm));
+            }
+        };
+        await Promise.all(
+            Array.from({ length: Math.min(CLEAN_COPY_PARALLEL, segments.length) }, () => worker()),
+        );
+        const list = path.join(work, 'list.txt');
+        await fs.promises.writeFile(list, outputs.map((out) => `file '${out}'`).join('\n'));
+        await runFfmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', target]);
+    } finally {
+        await fs.promises.rm(work, { recursive: true, force: true }).catch(() => {});
+    }
 }
 
 /**
