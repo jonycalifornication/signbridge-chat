@@ -49,7 +49,9 @@ const shots = await page.evaluate(
         for (const mode of ['glosses', 'text']) {
             const subs = window.HeadlessSubtitles.create({ mode, glosses, tokens, width, height });
             // Подложка вместо кадра аватара: сам кадр здесь не важен, важно, что
-            // подпись рисуется ПОВЕРХ и не съедает его.
+            // он уезжает ПОД полосу подписи целиком и ничем не закрыт. На
+            // картинке это видно сразу: зелёное поле снизу — кадр, чёрное
+            // сверху — полоса, её и срезают.
             const stage = document.createElement('canvas');
             stage.width = width;
             stage.height = height;

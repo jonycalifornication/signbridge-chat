@@ -295,12 +295,20 @@
             })
             : null;
 
+        // Размер ФАЙЛА, а не кадра аватара: с субтитрами кадр выше на полосу
+        // подписи, и настроить кодек по виджету значит срезать эту полосу.
+        const outWidth = subtitles ? subtitles.width : encWidth;
+        const outHeight = subtitles ? subtitles.height : encHeight;
+        if (subtitles) {
+            console.log(`[Headless] Субтитры: полоса ${subtitles.stripHeight}px сверху, кадр ${outWidth}x${outHeight}`);
+        }
+
         const muxer = new window.WebMMuxer.Muxer({
             target: new window.WebMMuxer.ArrayBufferTarget(),
             video: {
                 codec: 'V_VP8',
-                width: encWidth,
-                height: encHeight,
+                width: outWidth,
+                height: outHeight,
                 frameRate: FRAMERATE,
             },
         });
@@ -312,8 +320,8 @@
 
         videoEncoder.configure({
             codec: 'vp8',
-            width: encWidth,
-            height: encHeight,
+            width: outWidth,
+            height: outHeight,
             bitrate: 5_000_000,
             framerate: FRAMERATE,
         });
