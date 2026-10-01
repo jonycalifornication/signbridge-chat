@@ -345,6 +345,34 @@
         let rafIdx = 0;
         let isEncoding = true;
         let frameCount = 0;
+        /**
+         * Сторож пропавших мешей.
+         *
+         * На живой лекции один кадр из 30 тысяч выходит без пиджака: голова и
+         * кисти на месте, корпуса с рукавами нет. Ровно один кадр, 1/30 с.
+         * `gl.finish()` снял 99.7% таких кадров (было 12 из 1025), но не все,
+         * и остаточную причину по картинке не отличить: то ли three.js сам не
+         * нарисовал меш, то ли снимок взят недорисованным.
+         *
+         * Число отрисовок за кадр (`renderer.info.render.calls`) отвечает на
+         * это прямо: сцена у нас постоянная, и меньше обычного значит, что меш
+         * до видеокарты не доехал. Тогда кадр перерисовывается и снимается
+         * заново — и в лог идёт, помогло ли. Помогло — виноват был кадр
+         * (переснимок чинит); не помогло — меш выкинули раньше, на стороне
+         * сцены, и чинить надо там.
+         */
+        let expectedCalls = 0;
+        const callCounts = new Map();
+        let shortFrames = 0;
+        let recoveredFrames = 0;
+        let stubbornFrames = 0;
+        let guardOff = false;
+        /** Пока сцена догружается, отрисовок законно меньше — не считаем. */
+        const GUARD_WARMUP_FRAMES = 30;
+        /** Если «мало отрисовок» на каждом втором кадре — это не сбой, а наша
+         *  неверная догадка о сцене: выключаем, чтобы не рендерить всё дважды. */
+        const GUARD_GIVE_UP_SHARE = 0.25;
+        const GUARD_GIVE_UP_AFTER = 300;
         // Сколько секунд видео ждём — заполняется, когда известна
         // последовательность (до начала записи). 0 = посчитать не вышло.
         let expectedSeconds = 0;
@@ -471,6 +499,41 @@
                     }
 
                     if (isEncoding) {
+                        // Меш мог не доехать до кадра — проверяем по числу
+                        // отрисовок и, если их меньше обычного, рисуем ещё раз.
+                        if (!guardOff && widget.renderer.info && widget.renderer.info.render) {
+                            const calls = widget.renderer.info.render.calls;
+                            callCounts.set(calls, (callCounts.get(calls) || 0) + 1);
+                            if (frameCount < GUARD_WARMUP_FRAMES) {
+                                if (calls > expectedCalls) expectedCalls = calls;
+                            } else if (calls > expectedCalls) {
+                                expectedCalls = calls;
+                            } else if (calls < expectedCalls) {
+                                shortFrames++;
+                                let after = calls;
+                                try {
+                                    widget.renderer.render(widget.scene, widget.camera);
+                                    after = widget.renderer.info.render.calls;
+                                } catch (e) {
+                                    console.warn('[Headless] Перерисовать кадр не вышло:', e && e.message);
+                                }
+                                if (after >= expectedCalls) recoveredFrames++;
+                                else stubbornFrames++;
+                                if (shortFrames <= 10) {
+                                    console.warn(
+                                        `[Headless] Кадр ${frameCount} (${(frameCount / FRAMERATE).toFixed(2)} с): отрисовок ${calls} вместо ${expectedCalls}, после перерисовки ${after}`
+                                    );
+                                }
+                                if (
+                                    frameCount >= GUARD_GIVE_UP_AFTER &&
+                                    shortFrames > frameCount * GUARD_GIVE_UP_SHARE
+                                ) {
+                                    guardOff = true;
+                                    console.warn(`[Headless] Сторож отрисовок выключен: коротких кадров ${shortFrames} из ${frameCount} — это норма сцены, а не сбой`);
+                                }
+                            }
+                        }
+
                         // Ждём, пока драйвер РЕАЛЬНО дорисует кадр.
                         //
                         // `renderer.render()` только ставит команды в очередь, а
@@ -630,6 +693,16 @@
         });
 
         console.log(`[Headless] Deterministic recording finished. Total frames: ${frameCount}`);
+        {
+            const spread = [...callCounts.entries()].sort((a, b) => a[0] - b[0])
+                .map(([calls, times]) => `${calls}×${times}`).join(', ');
+            console.log(
+                `[Headless] Отрисовок за кадр: ${spread || 'нет данных'}; обычно ${expectedCalls}. ` +
+                `Коротких кадров ${shortFrames} (${frameCount ? (shortFrames * 100 / frameCount).toFixed(3) : '0'}%), ` +
+                `переснимок помог ${recoveredFrames}, не помог ${stubbornFrames}` +
+                (guardOff ? ' — сторож был выключен по ходу записи' : '')
+            );
+        }
         reportProgress(90, 'Упаковываем нейро-магию в контейнер...');
 
         if (frameCount === 0) {
