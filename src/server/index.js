@@ -813,8 +813,13 @@ async function findFreePeer() {
             return null;
         }
     });
-    const results = await Promise.all(probes);
-    return results.find(Boolean) || null;
+    const results = (await Promise.all(probes)).filter(Boolean);
+    if (results.length === 0) return null;
+    // Из свободных берём СЛУЧАЙНОГО, а не первого: при одновременных кусках
+    // все занятые воркеры опрашивают соседей разом, видят один и тот же
+    // список и отдают работу одному и тому же — он потом стоит с очередью,
+    // пока другие простаивают.
+    return results[Math.floor(Math.random() * results.length)];
 }
 
 app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res) => {
