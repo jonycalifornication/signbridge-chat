@@ -146,7 +146,13 @@ export function estimateRenderTimeoutMs(plan, { hasGPU = false } = {}) {
         (stats.dactylLetters || 0) * dactylLetterMs +
         (stats.missingLetters || 0) * missingLetterMs;
 
-    return clamp(estimate, hasGPU ? 180000 : 240000, hasGPU ? 600000 : 900000);
+    // Потолок поднят с 600 до 1200 с (GPU). Асинхронный путь ответа не ждёт —
+    // клиент опрашивает статус, — так что длинный потолок никому не держит
+    // соединение. Прежние 600 с были выбраны под короткие ролики чата, а
+    // лекцию режут кусками по пять минут видео: при 1.4–1.75× реального
+    // времени это 420–530 с, то есть упираться в потолок кусок начинал от
+    // любой посторонней нагрузки на карту.
+    return clamp(estimate, hasGPU ? 180000 : 240000, hasGPU ? 1200000 : 1800000);
 }
 
 export function estimateFallbackTimeoutMs(text, { hasGPU = false } = {}) {
