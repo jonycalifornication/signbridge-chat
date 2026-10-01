@@ -31,6 +31,8 @@ services:
       # Номер воркера: по нему nginx вернёт опрос статуса тому, кто задачу
       # считает (задача живёт в памяти своего процесса).
       - WORKER_ID=w0
+      # Кому передать задачу, если мы заняты.
+      - WORKER_PEERS=http://avatar-renderer-1:3003,http://avatar-renderer-2:3003,http://avatar-renderer-3:3003
       # Where the avatar build is published. Read only while syncing the mirror,
       # never during a render.
       - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
@@ -76,6 +78,8 @@ services:
       dockerfile: Dockerfile.renderer
     environment:
       - WORKER_ID=w1
+      # Кому передать задачу, если мы заняты.
+      - WORKER_PEERS=http://avatar-renderer:3003,http://avatar-renderer-2:3003,http://avatar-renderer-3:3003
       - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
       - AVATAR_API_KEY=${AVATAR_API_KEY:?set AVATAR_API_KEY in .env}
       - AVATAR_FILES_URL=${AVATAR_FILES_URL:-http://94.131.83.85:8000}
@@ -97,6 +101,8 @@ services:
       dockerfile: Dockerfile.renderer
     environment:
       - WORKER_ID=w2
+      # Кому передать задачу, если мы заняты.
+      - WORKER_PEERS=http://avatar-renderer:3003,http://avatar-renderer-1:3003,http://avatar-renderer-3:3003
       - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
       - AVATAR_API_KEY=${AVATAR_API_KEY:?set AVATAR_API_KEY in .env}
       - AVATAR_FILES_URL=${AVATAR_FILES_URL:-http://94.131.83.85:8000}
@@ -118,6 +124,8 @@ services:
       dockerfile: Dockerfile.renderer
     environment:
       - WORKER_ID=w3
+      # Кому передать задачу, если мы заняты.
+      - WORKER_PEERS=http://avatar-renderer:3003,http://avatar-renderer-1:3003,http://avatar-renderer-2:3003
       - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
       - AVATAR_API_KEY=${AVATAR_API_KEY:?set AVATAR_API_KEY in .env}
       - AVATAR_FILES_URL=${AVATAR_FILES_URL:-http://94.131.83.85:8000}
