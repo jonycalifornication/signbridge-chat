@@ -165,6 +165,16 @@ const tasks = new Map();
 // Пусто (один рендерер) — идентификаторы прежние, маршрутизация не нужна.
 const WORKER_ID = String(process.env.WORKER_ID || '').trim();
 
+// Соседние воркеры (по одному на видеокарту). Нужны затем, что раздать задачи
+// снаружи нечем: запрос на создание живёт миллисекунды, а работа идёт потом,
+// внутри воркера, и балансировщик её не видит — четыре запроса подряд уходили
+// на одного и того же. Поэтому занятость знает только сам воркер, и занятый
+// передаёт задачу свободному соседу.
+const WORKER_PEERS = String(process.env.WORKER_PEERS || '')
+    .split(',')
+    .map((x) => x.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+
 const MAX_CACHE_SIZE = 100 * 1024 * 1024; // 100 MB
 
 // Пауза записи и хвост в конце. Потолок — защита от опечатки: пауза в тысячу
@@ -399,6 +409,11 @@ class Semaphore {
             this.notify();
         });
     }
+    /** Есть ли свободный слот прямо сейчас. Для передачи задачи соседу. */
+    get free() {
+        return this.active < this.max && this.waiting.length === 0;
+    }
+
     release() {
         this.active--;
         console.log(`[Semaphore] RELEASE: Slot freed. Active: ${this.active}, Remaining in queue: ${this.waiting.length}`);
@@ -743,6 +758,43 @@ app.post('/api/v1/video/preview', rateLimit, apiKeyAuth, async (req, res) => {
 /**
  * v2: Asynchronous Task Creation
  */
+/**
+ * Свободен ли этот воркер. Спрашивают только соседи, по внутренней сети;
+ * nginx наружу /internal не отдаёт.
+ */
+app.get('/internal/slots', (_req, res) => {
+    res.json({
+        worker: WORKER_ID || null,
+        free: renderSemaphore.free,
+        active: renderSemaphore.active,
+        queued: renderSemaphore.waiting.length,
+    });
+});
+
+/**
+ * Найти свободного соседа. Возвращает его адрес или null.
+ *
+ * Опрашиваем всех разом и берём первого ответившего «свободен»: опрос дешёвый,
+ * а последовательный обход добавлял бы к каждому куску секунды ожидания.
+ */
+async function findFreePeer() {
+    if (WORKER_PEERS.length === 0) return null;
+    const probes = WORKER_PEERS.map(async (base) => {
+        try {
+            const resp = await fetch(`${base}/internal/slots`, {
+                signal: AbortSignal.timeout(1500),
+            });
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            return data?.free ? base : null;
+        } catch {
+            return null;
+        }
+    });
+    const results = await Promise.all(probes);
+    return results.find(Boolean) || null;
+}
+
 app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res) => {
     const { glosses, avatar, background, mode, sessionId, msgId } = req.body;
     const hints = normalizePlaybackHints(req.body);
@@ -757,6 +809,31 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
     }
     if (background && (typeof background !== 'string' || background.length > 50)) {
         return res.status(400).json({ error: 'invalid background' });
+    }
+
+    // Мы заняты, а сосед свободен — отдаём задачу ему и возвращаем ЕГО номер.
+    // Номер несёт префикс воркера, поэтому опрос статуса потом придёт туда же.
+    // Заголовок не даёт переданной задаче уехать дальше по кругу.
+    if (!renderSemaphore.free && req.get('X-Render-Handoff') !== '1') {
+        const peer = await findFreePeer();
+        if (peer) {
+            try {
+                const forwarded = await fetch(`${peer}/api/v1/video/generate-async`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json', 'X-Render-Handoff': '1' },
+                    body: JSON.stringify(req.body),
+                    signal: AbortSignal.timeout(15000),
+                });
+                if (forwarded.ok) {
+                    const data = await forwarded.json();
+                    console.log(`[Handoff] Задача передана соседу ${peer}: ${data.taskId}`);
+                    return res.json(data);
+                }
+                console.warn(`[Handoff] Сосед ${peer} ответил ${forwarded.status} — берём себе`);
+            } catch (err) {
+                console.warn(`[Handoff] Сосед ${peer} недоступен (${err.message}) — берём себе`);
+            }
+        }
     }
 
     const taskId = WORKER_ID ? `${WORKER_ID}-${crypto.randomUUID()}` : crypto.randomUUID();
