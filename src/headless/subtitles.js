@@ -1,5 +1,5 @@
 /**
- * Субтитры поверх кадра рендера.
+ * Субтитры в своей полосе НАД кадром рендера.
  *
  * Файл, как и `inject-renderer.js`, БЕЗ импортов: он вставляется в страницу
  * аватара обычным `<script>`, отдельно — чтобы эту часть можно было прогнать
@@ -19,6 +19,19 @@
  * Строка на экране — ПРЕДЛОЖЕНИЕ целиком, а внутри подсвечен текущий жест.
  * Показывать по одному слову значило бы мигать на каждом жесте и не давать
  * прочитать фразу; показывать всё без подсветки — не давать понять, где мы.
+ *
+ * **Подпись не лежит на аватаре.** Кадр с субтитрами выше кадра рендера на
+ * `STRIP_HEIGHT`: сверху полоса с текстом, под ней картинка аватара один в
+ * один. Так подпись не закрывает руки (а закрывала она именно низ кадра, где
+ * идёт половина жестов) и срезается одной командой, без маски и перекодировки
+ * остального:
+ *
+ *     ffmpeg -i видео.webm -vf crop=iw:ih-200:0:200 без_подписи.webm
+ *
+ * Полоса ФИКСИРОВАННОЙ высоты и всегда на месте — даже пока подписывать
+ * нечего. Плавающая высота значила бы, что обрезать надо каждый файл своим
+ * числом, а растущая на ходу — что видео меняет размер посреди себя, чего
+ * кодек не позволяет вовсе.
  */
 (function () {
     'use strict';
@@ -27,6 +40,16 @@
     // буквы — ә, ң, ө, ұ, ү, һ, і. Без явного имени chromium в slim-образе
     // рисует квадраты: системных шрифтов там нет вообще.
     const FONT_FAMILY = '"DejaVu Sans", "Liberation Sans", sans-serif';
+    /** Высота полосы с подписью, пиксели. Чётная: VP8 и yuv420p требуют
+     *  чётных сторон, а полоса прибавляется к высоте кадра. */
+    const STRIP_HEIGHT = 200;
+    /** Чёрная, а не под цвет фона: фон аватара выбирает пользователь, и
+     *  зелёный под хромакей съел бы подпись вместе с полосой. Чёрное поле
+     *  ещё и видно, где резать. */
+    const STRIP_BACKGROUND = '#000000';
+    /** Размер букв. Тоже фиксированный — полоса под них и рассчитана:
+     *  три ряда по 1.55 кегля = 177 px внутри 200. */
+    const FONT_SIZE = 38;
     /** Сколько строк подписи показываем. Больше трёх — это уже не субтитр, а
      *  текст поверх аватара; в такой ситуации показываем окно вокруг текущего
      *  жеста, а не всё предложение. */
@@ -93,16 +116,17 @@
 
         const width = Math.max(1, Math.round(Number(options.width) || 0));
         const height = Math.max(1, Math.round(Number(options.height) || 0));
+        // Холст выше кадра: полоса сверху, кадр под ней. Кодек настраивают по
+        // этому размеру — его и отдаём наружу.
+        const outHeight = height + STRIP_HEIGHT;
         const canvas = document.createElement('canvas');
         canvas.width = width;
-        canvas.height = height;
+        canvas.height = outHeight;
         const ctx = canvas.getContext('2d');
 
-        const size = Math.max(16, Math.min(44, Math.round(height * 0.05)));
-        const pad = Math.round(size * 0.45);
+        const size = FONT_SIZE;
         const rowStep = Math.round(size * 1.55);
         const maxWidth = Math.round(width * 0.88);
-        const bottom = Math.round(height * 0.05);
 
         // Где стоим в плоском списке. −1 значит «жестов ещё не было»: подпись до
         // первого события не рисуется вовсе — там тишина перед первым
@@ -150,20 +174,6 @@
             return rows;
         }
 
-        function roundRect(x, y, w, h, r) {
-            ctx.beginPath();
-            ctx.moveTo(x + r, y);
-            ctx.lineTo(x + w - r, y);
-            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-            ctx.lineTo(x + w, y + h - r);
-            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-            ctx.lineTo(x + r, y + h);
-            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-            ctx.lineTo(x, y + r);
-            ctx.quadraticCurveTo(x, y, x + r, y);
-            ctx.closePath();
-        }
-
         function paint() {
             if (cursor < 0) return;
             const line = lineOf[cursor];
@@ -186,16 +196,14 @@
             ctx.textBaseline = 'middle';
             const space = ctx.measureText(' ').width;
 
+            // Блок стоит по центру полосы: один ряд не липнет к её краю, три
+            // не упираются в кадр.
             const blockHeight = rows.length * rowStep;
-            let y = height - bottom - blockHeight + rowStep / 2;
+            let y = Math.round((STRIP_HEIGHT - blockHeight) / 2) + rowStep / 2;
             for (const indexes of rows) {
                 const widths = indexes.map((i) => ctx.measureText(row[i]).width);
                 const total = widths.reduce((a, b) => a + b, 0) + space * (indexes.length - 1);
                 let x = Math.round((width - total) / 2);
-
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-                roundRect(x - pad, y - rowStep / 2 + 2, total + pad * 2, rowStep - 4, Math.round(pad / 2));
-                ctx.fill();
 
                 for (let k = 0; k < indexes.length; k++) {
                     // Текущий жест жёлтым: белым по белому фону подписи его не
@@ -214,11 +222,18 @@
          * Кадр сначала копируется целиком: фон у нас задан клиром WebGL, и
          * рисовать подпись прямо в него нельзя — следующий кадр аватара
          * подпись бы не стёр.
+         *
+         * Полоса заливается КАЖДЫЙ кадр и до того, как появится первый жест:
+         * пока подписывать нечего, она просто чёрная. Прозрачной её оставить
+         * нельзя — у кадра с прозрачным фоном полоса стала бы дырой, через
+         * которую видно подложку плеера.
          */
         let complained = false;
         function compose(source) {
-            ctx.clearRect(0, 0, width, height);
-            ctx.drawImage(source, 0, 0, width, height);
+            ctx.clearRect(0, 0, width, outHeight);
+            ctx.fillStyle = STRIP_BACKGROUND;
+            ctx.fillRect(0, 0, width, STRIP_HEIGHT);
+            ctx.drawImage(source, 0, STRIP_HEIGHT, width, height);
             try {
                 paint();
             } catch (e) {
@@ -233,7 +248,9 @@
             return canvas;
         }
 
-        return { note, compose };
+        // width/height — размер ТОГО, что уходит в кодек: полоса входит в кадр,
+        // и настроить энкодер по размеру виджета значит обрезать его же вывод.
+        return { note, compose, width, height: outHeight, stripHeight: STRIP_HEIGHT };
     }
 
     window.HeadlessSubtitles = { create };
