@@ -779,6 +779,65 @@ function workerIsFree() {
     return renderSemaphore.free && tasksInFlight() < renderSemaphore.max;
 }
 
+// Кэш «номер воркера → адрес». Нужен, чтобы ответить на опрос чужой задачи:
+// адрес соседа мы знаем, а какой у него номер — спрашиваем и запоминаем.
+const peerAddressById = new Map();
+let peerMapRefreshedAt = 0;
+
+async function refreshPeerMap(maxAgeMs = 60000) {
+    if (Date.now() - peerMapRefreshedAt < maxAgeMs && peerAddressById.size > 0) return;
+    await Promise.all(
+        WORKER_PEERS.map(async (base) => {
+            try {
+                const resp = await fetch(`${base}/internal/slots`, { signal: AbortSignal.timeout(1500) });
+                if (!resp.ok) return;
+                const data = await resp.json();
+                if (data?.worker) peerAddressById.set(data.worker, base);
+            } catch {
+                /* сосед не ответил — в следующий раз */
+            }
+        }),
+    );
+    peerMapRefreshedAt = Date.now();
+}
+
+/** Адрес воркера, которому принадлежит задача, или null (наша/неизвестно). */
+async function ownerOf(taskId) {
+    const prefix = String(taskId || '').split('-')[0];
+    if (!prefix || !/^w\d+$/.test(prefix) || prefix === WORKER_ID) return null;
+    await refreshPeerMap();
+    return peerAddressById.get(prefix) || null;
+}
+
+/**
+ * Переслать ответ соседа как свой — поток в поток.
+ *
+ * Нужно затем, что задача живёт в памяти того, кто её начал, а опрос может
+ * прийти к любому: адреса контейнеров меняются при пересборке, и полагаться
+ * на маршрутизацию снаружи оказалось нельзя — после одной пересборки все
+ * опросы задач w0 стали отвечать «task not found», хотя задача была жива.
+ */
+async function pipeFromOwner(req, res, url) {
+    const upstream = await fetch(url, {
+        headers: { accept: req.get('accept') || '*/*' },
+        signal: AbortSignal.timeout(1200000),
+    });
+    res.status(upstream.status);
+    for (const name of ['content-type', 'content-length', 'content-disposition', 'cache-control']) {
+        const value = upstream.headers.get(name);
+        if (value) res.setHeader(name, value);
+    }
+    if (!upstream.body) return res.end();
+    const reader = upstream.body.getReader();
+    req.on('close', () => reader.cancel().catch(() => {}));
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(Buffer.from(value));
+    }
+    res.end();
+}
+
 /**
  * Свободен ли этот воркер. Спрашивают только соседи, по внутренней сети;
  * nginx наружу /internal не отдаёт.
@@ -937,8 +996,11 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
     const renderPreview = renderPlan ? renderPlanToGlossPreview(renderPlan) : null;
 
     // Дополняем застолблённую запись тем, что стало известно из плана.
+    // requestBody держим затем, что ждущую задачу можно отдать освободившемуся
+    // соседу — а для этого нужно, из чего её пересоздать.
     tasks.set(taskId, {
         ...tasks.get(taskId),
+        requestBody: req.body,
         status: 'processing',
         progress: 0,
         message: 'Задача создана...',
@@ -999,9 +1061,51 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
 
 
             // --- Queue & Generation ---
+            //
+            // Пока стоим в очереди, приглядываем за соседями: освободился
+            // кто-то раньше нас — отдаём работу ему. Иначе задача прилипала к
+            // своему воркеру, и на хвосте одна карта работала, а соседние
+            // простаивали. Клиент при этом ничего не замечает: номер задачи
+            // прежний, а статус и файл мы проксируем тому, кто считает.
+            let migration = null;
+            if (!renderSemaphore.free && WORKER_PEERS.length > 0) {
+                migration = setInterval(async () => {
+                    if (task.status !== 'processing' || task.movedTo) return;
+                    const peer = await findFreePeer();
+                    // Пока спрашивали соседей, могли начать считать сами —
+                    // тогда отдавать нельзя: получится два рендера одного
+                    // куска на двух картах.
+                    if (!peer || task.movedTo || task.startedLocally) return;
+                    try {
+                        const resp = await fetch(`${peer}/api/v1/video/generate-async`, {
+                            method: 'POST',
+                            headers: { 'content-type': 'application/json', 'X-Render-Handoff': '1' },
+                            body: JSON.stringify(task.requestBody || {}),
+                            signal: AbortSignal.timeout(20000),
+                        });
+                        if (!resp.ok) return;
+                        const data = await resp.json();
+                        task.movedTo = { base: peer, taskId: data.taskId };
+                        task.message = 'Передано свободной карте...';
+                        console.log(`[Миграция] Ждущая задача ${taskId} уехала к ${peer}: ${data.taskId}`);
+                        clearInterval(migration);
+                        migration = null;
+                    } catch (err) {
+                        console.warn(`[Миграция] Не вышло отдать ${taskId}: ${err.message}`);
+                    }
+                }, 5000);
+            }
+
             await renderSemaphore.acquire((pos) => {
                 onProgress(0, `Ждем очереди (вы #${pos} в списке)...`);
             });
+            if (migration) { clearInterval(migration); migration = null; }
+            // Пока ждали слот, задачу успели отдать соседу — считать не надо.
+            if (task.movedTo) {
+                renderSemaphore.release();
+                return;
+            }
+            task.startedLocally = true;
             acquired = true;
 
             const result = await generateVideoCore(glosses, avatar, background, userAgent, onProgress, {
@@ -1067,11 +1171,24 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
 /**
  * v2: SSE Status Endpoint
  */
-app.get('/api/v1/video/status/:taskId', (req, res) => {
+app.get('/api/v1/video/status/:taskId', async (req, res) => {
     const taskId = req.params.taskId;
-    const task = tasks.get(taskId);
+    let task = tasks.get(taskId);
+
+    // Задача уехала к соседу (освободился раньше нас) — спрашиваем у него.
+    if (task?.movedTo) {
+        return pipeFromOwner(req, res, `${task.movedTo.base}/api/v1/video/status/${task.movedTo.taskId}`)
+            .catch(() => res.status(502).json({ error: 'owner_unreachable' }));
+    }
 
     if (!task) {
+        // Чужая задача: отвечает тот, у кого она есть. Снаружи запрос мог
+        // прийти к любому воркеру, и это нормально.
+        const owner = await ownerOf(taskId);
+        if (owner) {
+            return pipeFromOwner(req, res, `${owner}/api/v1/video/status/${taskId}`)
+                .catch(() => res.status(502).json({ error: 'owner_unreachable' }));
+        }
         return res.status(404).json({ error: 'Task not found' });
     }
 
@@ -1092,7 +1209,8 @@ app.get('/api/v1/video/status/:taskId', (req, res) => {
         message: task.message,
         downloadUrl: task.downloadUrl,
         status: task.status,
-        error: task.errorMessage || null
+        error: task.errorMessage || null,
+        worker: WORKER_ID || null
     };
     res.write(`data: ${JSON.stringify(initialState)}\n\n`);
 
@@ -1136,9 +1254,22 @@ async function cleanupTask(taskId) {
 /**
  * v2: Final Download Endpoint 
  */
-app.get('/api/v1/video/download/:taskId', (req, res) => {
+app.get('/api/v1/video/download/:taskId', async (req, res) => {
     const taskId = req.params.taskId;
     const task = tasks.get(taskId);
+
+    if (task?.movedTo) {
+        return pipeFromOwner(req, res, `${task.movedTo.base}/api/v1/video/download/${task.movedTo.taskId}`)
+            .catch(() => res.status(502).json({ error: 'owner_unreachable' }));
+    }
+
+    if (!task) {
+        const owner = await ownerOf(taskId);
+        if (owner) {
+            return pipeFromOwner(req, res, `${owner}/api/v1/video/download/${taskId}`)
+                .catch(() => res.status(502).json({ error: 'owner_unreachable' }));
+        }
+    }
 
     if (!task || !task.finalFilePath) {
         return res.status(404).json({ error: 'File not ready or expired' });
