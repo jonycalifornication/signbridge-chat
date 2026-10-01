@@ -159,6 +159,12 @@ if (fs.existsSync(SESSIONS_FILE) && fs.statSync(SESSIONS_FILE).isDirectory()) {
 
 const tasks = new Map();
 
+// Кто мы среди воркеров: задача живёт в ПАМЯТИ того процесса, который её
+// начал, поэтому опрос статуса должен вернуться туда же. Проще всего сказать
+// об этом в самом идентификаторе: nginx читает префикс и выбирает адрес.
+// Пусто (один рендерер) — идентификаторы прежние, маршрутизация не нужна.
+const WORKER_ID = String(process.env.WORKER_ID || '').trim();
+
 const MAX_CACHE_SIZE = 100 * 1024 * 1024; // 100 MB
 
 // Пауза записи и хвост в конце. Потолок — защита от опечатки: пауза в тысячу
@@ -303,7 +309,15 @@ function resolveRenderPlanApiConfig() {
 }
 
 function hasRendererGPU() {
-    return fs.existsSync('/dev/nvidia0');
+    // ЛЮБАЯ карта, а не именно нулевая. Контейнер, привязанный к карте 1 через
+    // NVIDIA_VISIBLE_DEVICES, видит устройство /dev/nvidia1 — и прежняя
+    // проверка молча уводила его на программный рендер. Замер: тот же ролик
+    // 184 с вместо 40, и таймаут считался по «процессорной» формуле.
+    try {
+        return fs.readdirSync('/dev').some((name) => /^nvidia\d+$/.test(name));
+    } catch {
+        return false;
+    }
 }
 
 function resolveEncoderMaxQueueSize(hasGPU) {
@@ -745,7 +759,7 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
         return res.status(400).json({ error: 'invalid background' });
     }
 
-    const taskId = crypto.randomUUID();
+    const taskId = WORKER_ID ? `${WORKER_ID}-${crypto.randomUUID()}` : crypto.randomUUID();
     const userAgent = req.headers['user-agent'] || '';
 
     // De-duplication check: if this msgId is already being processed, just return that taskId

@@ -1,3 +1,27 @@
+# Воркеры рендера: по одному на видеокарту. Параллель на ОДНОЙ карте даёт
+# всего четверть прироста и втрое растягивает самый невезучий кусок (замер
+# 01.10: три задачи на карте — 32/47/80 с против 33 с поодиночке), а на
+# разных картах каждая идёт на полной скорости.
+upstream renderers {
+  least_conn;
+  server avatar-renderer:3003   max_fails=0;
+  server avatar-renderer-1:3003 max_fails=0;
+  server avatar-renderer-2:3003 max_fails=0;
+  server avatar-renderer-3:3003 max_fails=0;
+}
+
+# Задача живёт в памяти того воркера, который её начал, поэтому опрос статуса
+# и скачивание по номеру задачи обязаны вернуться туда же. Воркер сообщает о
+# себе префиксом в идентификаторе (WORKER_ID), а здесь префикс превращается в
+# адрес. Неизвестный префикс (старые задачи, один рендерер) — на общий пул.
+map $taskid $task_owner {
+  default        renderers;
+  ~^w0-          avatar-renderer:3003;
+  ~^w1-          avatar-renderer-1:3003;
+  ~^w2-          avatar-renderer-2:3003;
+  ~^w3-          avatar-renderer-3:3003;
+}
+
 server {
   listen 80;
   server_name _;
@@ -11,8 +35,36 @@ server {
   }
 
   # --- Renderer endpoints (video generation + sessions) ---
+
+  # Статус и скачивание — строго тому воркеру, который задачу начал.
+  # resolver нужен потому, что адрес берётся из переменной: без него nginx
+  # пытался бы разрешить имя один раз при старте и падал, если воркер ещё
+  # не поднялся.
+  location ~ ^/api/v1/video/(status|download)/(?<taskid>[^/]+) {
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $owner $task_owner;
+    proxy_pass http://$owner$request_uri;
+    proxy_http_version 1.1;
+
+    # Статус отдаётся потоком (SSE) — буферизация его бы задержала.
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_set_header Connection '';
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    proxy_read_timeout 1200;
+    proxy_connect_timeout 60;
+    proxy_send_timeout 1200;
+  }
+
+  # Всё остальное (создание задачи, предпросмотр, готовые файлы из общего
+  # кэша) — на наименее занятый воркер.
   location /api/v1/video/ {
-    proxy_pass ${RENDERER_URL};
+    proxy_pass http://renderers;
     proxy_http_version 1.1;
 
     proxy_buffering off;
@@ -24,9 +76,11 @@ server {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
 
-    proxy_read_timeout 300;
-    proxy_connect_timeout 300;
-    proxy_send_timeout 300;
+    # Потолок рендера на карте — 1200 с (см. estimateRenderTimeoutMs), и
+    # синхронный путь держит соединение всё это время.
+    proxy_read_timeout 1200;
+    proxy_connect_timeout 60;
+    proxy_send_timeout 1200;
   }
 
   location /api/v1/sessions {

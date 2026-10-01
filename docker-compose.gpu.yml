@@ -7,3 +7,36 @@ services:
       __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/10_nvidia.json
     volumes:
       - ./docker/nvidia-egl/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/10_nvidia.json:ro
+
+  avatar-renderer-1:
+    runtime: nvidia
+    environment:
+      # Своя карта: параллель на одной даёт четверть прироста, на разных —
+      # почти линейный рост.
+      NVIDIA_VISIBLE_DEVICES: "1"
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,graphics,video,display}
+      __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/10_nvidia.json
+    volumes:
+      - ./docker/nvidia-egl/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/10_nvidia.json:ro
+
+  avatar-renderer-2:
+    runtime: nvidia
+    environment:
+      # Своя карта: параллель на одной даёт четверть прироста, на разных —
+      # почти линейный рост.
+      NVIDIA_VISIBLE_DEVICES: "2"
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,graphics,video,display}
+      __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/10_nvidia.json
+    volumes:
+      - ./docker/nvidia-egl/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/10_nvidia.json:ro
+
+  avatar-renderer-3:
+    runtime: nvidia
+    environment:
+      # Своя карта: параллель на одной даёт четверть прироста, на разных —
+      # почти линейный рост.
+      NVIDIA_VISIBLE_DEVICES: "3"
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,graphics,video,display}
+      __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/10_nvidia.json
+    volumes:
+      - ./docker/nvidia-egl/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/10_nvidia.json:ro
