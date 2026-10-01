@@ -28,6 +28,9 @@ services:
     ports:
       - "127.0.0.1:3003:3003"
     environment:
+      # Номер воркера: по нему nginx вернёт опрос статуса тому, кто задачу
+      # считает (задача живёт в памяти своего процесса).
+      - WORKER_ID=w0
       # Where the avatar build is published. Read only while syncing the mirror,
       # never during a render.
       - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
@@ -53,4 +56,79 @@ services:
       - ./data:/app/data
       # The mirrored avatar build survives container rebuilds.
       - ./avatar_mirror:/app/avatar_mirror
+    restart: always
+
+  # ── Воркеры рендера на остальных картах ──────────────────────────────────
+  #
+  # В боксе четыре Quadro RTX 6000, а рендер занимал одну и не больше 15% её
+  # мощности. Два рендера на ОДНОЙ карте дают всего четверть прироста и втрое
+  # растягивают самый невезучий кусок (замер 01.10: 32/47/80 с против 33 с
+  # поодиночке) — зато на РАЗНОЙ карте каждый идёт на полной скорости.
+  #
+  # Отличия от основного рендерера ровно три: своя карта, свой WORKER_ID (по
+  # нему nginx возвращает опрос статуса тому, кто задачу считает) и своё
+  # зеркало аватара — общее пришлось бы синхронизировать всем четверым разом,
+  # и они затирали бы друг другу подготовленную копию. Кэш готовых файлов,
+  # наоборот, общий: по нему отдаётся результат, кто бы его ни посчитал.
+  avatar-renderer-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.renderer
+    environment:
+      - WORKER_ID=w1
+      - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
+      - AVATAR_API_KEY=${AVATAR_API_KEY:?set AVATAR_API_KEY in .env}
+      - AVATAR_FILES_URL=${AVATAR_FILES_URL:-http://94.131.83.85:8000}
+      - RENDER_PLAN_LANGUAGE_ID=${RENDER_PLAN_LANGUAGE_ID:-KSL}
+      - RENDER_WIDTH=${RENDER_WIDTH:-}
+      - RENDER_HEIGHT=${RENDER_HEIGHT:-}
+      - AVATAR_SYNC_INTERVAL_MS=${AVATAR_SYNC_INTERVAL_MS:-}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+    volumes:
+      - ./video_cache:/app/video_cache
+      - ./temp_videos:/app/temp_videos
+      - ./data:/app/data
+      - ./avatar_mirror_w1:/app/avatar_mirror
+    restart: always
+
+  avatar-renderer-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.renderer
+    environment:
+      - WORKER_ID=w2
+      - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
+      - AVATAR_API_KEY=${AVATAR_API_KEY:?set AVATAR_API_KEY in .env}
+      - AVATAR_FILES_URL=${AVATAR_FILES_URL:-http://94.131.83.85:8000}
+      - RENDER_PLAN_LANGUAGE_ID=${RENDER_PLAN_LANGUAGE_ID:-KSL}
+      - RENDER_WIDTH=${RENDER_WIDTH:-}
+      - RENDER_HEIGHT=${RENDER_HEIGHT:-}
+      - AVATAR_SYNC_INTERVAL_MS=${AVATAR_SYNC_INTERVAL_MS:-}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+    volumes:
+      - ./video_cache:/app/video_cache
+      - ./temp_videos:/app/temp_videos
+      - ./data:/app/data
+      - ./avatar_mirror_w2:/app/avatar_mirror
+    restart: always
+
+  avatar-renderer-3:
+    build:
+      context: .
+      dockerfile: Dockerfile.renderer
+    environment:
+      - WORKER_ID=w3
+      - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
+      - AVATAR_API_KEY=${AVATAR_API_KEY:?set AVATAR_API_KEY in .env}
+      - AVATAR_FILES_URL=${AVATAR_FILES_URL:-http://94.131.83.85:8000}
+      - RENDER_PLAN_LANGUAGE_ID=${RENDER_PLAN_LANGUAGE_ID:-KSL}
+      - RENDER_WIDTH=${RENDER_WIDTH:-}
+      - RENDER_HEIGHT=${RENDER_HEIGHT:-}
+      - AVATAR_SYNC_INTERVAL_MS=${AVATAR_SYNC_INTERVAL_MS:-}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+    volumes:
+      - ./video_cache:/app/video_cache
+      - ./temp_videos:/app/temp_videos
+      - ./data:/app/data
+      - ./avatar_mirror_w3:/app/avatar_mirror
     restart: always
