@@ -1027,10 +1027,16 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
         let acquired = false;
         
         const onProgress = (pct, msg) => {
-            task.progress = pct;
+            // Процент не убывает. Этапы считают его независимо (страница — по
+            // кадрам, сервер — по шагам), и любой их перехлёст на экране
+            // выглядит как откат: «80, потом снова 75». Пусть лучше число
+            // постоит на месте, чем поедет назад.
+            task.progress = Math.max(task.progress ?? 0, pct);
             task.message = msg;
             if (task.sseResponse) {
-                task.sseResponse.write(`data: ${JSON.stringify({ progress: pct, message: msg })}\n\n`);
+                task.sseResponse.write(
+                    `data: ${JSON.stringify({ progress: task.progress, message: msg })}\n\n`,
+                );
             }
         };
 
