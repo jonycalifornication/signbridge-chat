@@ -340,6 +340,8 @@
         // Сколько секунд видео ждём — заполняется, когда известна
         // последовательность (до начала записи). 0 = посчитать не вышло.
         let expectedSeconds = 0;
+        // Запись объявлена законченной: отчёты по кадрам больше не шлём.
+        let recordingReported = false;
         let pendingNetwork = 0;
         let totalHeldMs = 0;
         const maxEncoderQueueSize = resolveEncoderMaxQueueSize(renderProfile);
@@ -484,7 +486,7 @@
                         bitmap.close();
                         frameCount++;
 
-                        if (frameCount % 60 === 0) {
+                        if (frameCount % 60 === 0 && !recordingReported) {
                             const done = frameCount / FRAMERATE;
                             if (expectedSeconds > 0) {
                                 // Доля записанного, зажатая в полосу 50→75.
@@ -563,6 +565,10 @@
             }
 
             // 6. Stop recording
+            // Дальше идёт только хвост записи, и отчёты о кадрах больше не
+            // нужны: цикл ещё крутится, и его «50..75%» перебивали бы уже
+            // объявленные 80 — на экране это выглядело как откат процента.
+            recordingReported = true;
             reportProgress(80, 'Финальные вычисления нейросети...');
 
             // Хвост записи после последнего жеста: руки опускаются за
