@@ -333,9 +333,20 @@
             ? new window.Mp4Muxer.Muxer({
                 target: new window.Mp4Muxer.ArrayBufferTarget(),
                 video: { codec: 'avc', width: outWidth, height: outHeight },
-                // Без этого moov пишется в конец файла: такой mp4 не начинает
-                // играть, пока не скачан целиком, а мы отдаём его ссылкой.
-                fastStart: 'in-memory',
+                // moov пишется В КОНЕЦ, и это осознанно.
+                //
+                // `fastStart: 'in-memory'` держит весь файл разобранным в
+                // памяти и перекладывает его по мере роста — запись при этом
+                // тормозит тем сильнее, чем длиннее кусок. Замер на боксе:
+                // на 1440 кадрах съёмка шла 51 кадр/с, на 5195 — 11.5, а до
+                // перехода на mp4 (webm-мукс, 17 296 кадров) держалось 58.
+                // Трёхминутный отрезок из-за этого считался семь минут вместо
+                // полутора.
+                //
+                // moov в начало переставляет сервер — `ffmpeg -c copy
+                // -movflags +faststart`, это перекладка контейнера за секунды,
+                // без перекодирования.
+                fastStart: false,
             })
             : new window.WebMMuxer.Muxer({
                 target: new window.WebMMuxer.ArrayBufferTarget(),
