@@ -303,28 +303,66 @@
             console.log(`[Headless] Субтитры: полоса ${subtitles.stripHeight}px сверху, кадр ${outWidth}x${outHeight}`);
         }
 
-        const muxer = new window.WebMMuxer.Muxer({
-            target: new window.WebMMuxer.ArrayBufferTarget(),
-            video: {
-                codec: 'V_VP8',
-                width: outWidth,
-                height: outHeight,
-                frameRate: FRAMERATE,
-            },
-        });
+        // Контейнер: mp4, если браузер умеет кодировать H.264, иначе прежний
+        // webm. Перекодировки нет ни там, ни там — кодирует один и тот же
+        // энкодер, меняется кодек и упаковка. mp4 выбран потому, что его берут
+        // все плееры и монтажки, а webm половина из них не открывает.
+        //
+        // Уровень 4.0 (`4d0028`) не прихоть: 3.1 (`42001f`) не тянет кадр
+        // 1280×1024 и на боксе отвечает «не поддержан».
+        const AVC_CODEC = 'avc1.4d0028';
+        const avcConfig = {
+            codec: AVC_CODEC,
+            width: outWidth,
+            height: outHeight,
+            bitrate: 5_000_000,
+            framerate: FRAMERATE,
+        };
+        let useMp4 = false;
+        if (window.Mp4Muxer && typeof VideoEncoder.isConfigSupported === 'function') {
+            try {
+                const support = await VideoEncoder.isConfigSupported(avcConfig);
+                useMp4 = !!(support && support.supported);
+            } catch (e) {
+                console.warn('[Headless] H.264 не проверился, пишем webm:', e && e.message);
+            }
+        }
+        console.log(`[Headless] Контейнер: ${useMp4 ? 'mp4 (H.264)' : 'webm (VP8)'}, кадр ${outWidth}x${outHeight}`);
+
+        const muxer = useMp4
+            ? new window.Mp4Muxer.Muxer({
+                target: new window.Mp4Muxer.ArrayBufferTarget(),
+                video: { codec: 'avc', width: outWidth, height: outHeight },
+                // Без этого moov пишется в конец файла: такой mp4 не начинает
+                // играть, пока не скачан целиком, а мы отдаём его ссылкой.
+                fastStart: 'in-memory',
+            })
+            : new window.WebMMuxer.Muxer({
+                target: new window.WebMMuxer.ArrayBufferTarget(),
+                video: {
+                    codec: 'V_VP8',
+                    width: outWidth,
+                    height: outHeight,
+                    frameRate: FRAMERATE,
+                },
+            });
 
         let videoEncoder = new VideoEncoder({
             output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
             error: (e) => console.error('[Headless] VideoEncoder Error:', e),
         });
 
-        videoEncoder.configure({
-            codec: 'vp8',
-            width: outWidth,
-            height: outHeight,
-            bitrate: 5_000_000,
-            framerate: FRAMERATE,
-        });
+        videoEncoder.configure(
+            useMp4
+                ? { ...avcConfig, avc: { format: 'avc' } }
+                : {
+                    codec: 'vp8',
+                    width: outWidth,
+                    height: outHeight,
+                    bitrate: 5_000_000,
+                    framerate: FRAMERATE,
+                }
+        );
 
         // 4. Hijack the environment for deterministic time
         const originalSetTimeout = window.setTimeout;
@@ -684,7 +722,7 @@
         }
 
         const buffer = muxer.target.buffer;
-        const blob = new Blob([buffer], { type: 'video/webm' });
+        const blob = new Blob([buffer], { type: useMp4 ? 'video/mp4' : 'video/webm' });
 
         const recordingFinished = new Promise((resolve) => {
             const reader = new FileReader();

@@ -17,6 +17,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.21.0",
+    "mp4-muxer": "^5.2.2",
     "puppeteer": "^24.34.0",
     "webm-muxer": "^5.0.2"
   },
