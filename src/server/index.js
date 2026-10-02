@@ -1167,35 +1167,52 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
             // кто-то чужой (обучение глоссера живёт на нулевой). Тогда работу
             // тоже лучше отдать — соседу со свободной картой тот же кусок
             // достаётся впятеро быстрее.
-            let migration = null;
+            /** Отдать задачу соседу. true — отдали, дальше считать не надо. */
+            const handOff = async (peer, why) => {
+                if (!peer || task.movedTo || task.startedLocally) return false;
+                try {
+                    const resp = await fetch(`${peer}/api/v1/video/generate-async`, {
+                        method: 'POST',
+                        headers: { 'content-type': 'application/json', 'X-Render-Handoff': '1' },
+                        body: JSON.stringify(task.requestBody || {}),
+                        signal: AbortSignal.timeout(20000),
+                    });
+                    if (!resp.ok) return false;
+                    const data = await resp.json();
+                    task.movedTo = { base: peer, taskId: data.taskId };
+                    task.message = 'Передано свободной карте...';
+                    console.log(`[Миграция] Задача ${taskId} уехала к ${peer} (${why}): ${data.taskId}`);
+                    return true;
+                } catch (err) {
+                    console.warn(`[Миграция] Не вышло отдать ${taskId}: ${err.message}`);
+                    return false;
+                }
+            };
+
             const ourGpu = await gpuLoad();
             const gpuCrowded = typeof ourGpu === 'number' && ourGpu >= GPU_BUSY_PERCENT;
-            if ((!renderSemaphore.free || gpuCrowded) && WORKER_PEERS.length > 0) {
+
+            // Карта занята чужой работой — спрашиваем соседей СРАЗУ, до того как
+            // возьмём слот. Через сторожа ниже это не работает: он просыпается
+            // раз в пять секунд, а свободный воркер начинает считать мгновенно
+            // и ставит `startedLocally` — отдавать уже поздно. Именно так первая
+            // версия этой правки и промолчала: задача честно осталась на карте,
+            // где шло обучение, и считалась впятеро дольше.
+            if (gpuCrowded && renderSemaphore.free && WORKER_PEERS.length > 0) {
+                const peer = await findFreePeer(ourGpu - GPU_BETTER_BY);
+                if (await handOff(peer, `карта занята на ${ourGpu}%`)) return;
+            }
+
+            let migration = null;
+            if (!renderSemaphore.free && WORKER_PEERS.length > 0) {
                 migration = setInterval(async () => {
                     if (task.status !== 'processing' || task.movedTo) return;
-                    const peer = await findFreePeer(
-                        gpuCrowded && renderSemaphore.free ? ourGpu - GPU_BETTER_BY : null,
-                    );
                     // Пока спрашивали соседей, могли начать считать сами —
                     // тогда отдавать нельзя: получится два рендера одного
                     // куска на двух картах.
-                    if (!peer || task.movedTo || task.startedLocally) return;
-                    try {
-                        const resp = await fetch(`${peer}/api/v1/video/generate-async`, {
-                            method: 'POST',
-                            headers: { 'content-type': 'application/json', 'X-Render-Handoff': '1' },
-                            body: JSON.stringify(task.requestBody || {}),
-                            signal: AbortSignal.timeout(20000),
-                        });
-                        if (!resp.ok) return;
-                        const data = await resp.json();
-                        task.movedTo = { base: peer, taskId: data.taskId };
-                        task.message = 'Передано свободной карте...';
-                        console.log(`[Миграция] Ждущая задача ${taskId} уехала к ${peer}: ${data.taskId}`);
+                    if (await handOff(await findFreePeer(), 'освободился сосед')) {
                         clearInterval(migration);
                         migration = null;
-                    } catch (err) {
-                        console.warn(`[Миграция] Не вышло отдать ${taskId}: ${err.message}`);
                     }
                 }, 5000);
             }
