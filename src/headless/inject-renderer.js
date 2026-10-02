@@ -686,11 +686,6 @@
         const buffer = muxer.target.buffer;
         const blob = new Blob([buffer], { type: 'video/webm' });
 
-        const recordingFinished = new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result);
-            reader.readAsDataURL(blob);
-        });
 
         console.log(`[Headless] Deterministic recording finished. Total frames: ${frameCount}`);
         {
@@ -709,7 +704,37 @@
             throw new Error('Render produced no frames');
         }
 
-        return await recordingFinished;
+        // Готовое видео уходит на сервер ОБЫЧНОЙ загрузкой, а не строкой.
+        //
+        // Раньше blob переводился в dataURL и возвращался из `page.evaluate`.
+        // На коротком ролике это незаметно, а на девяти минутах (~250 МБ) даёт
+        // треть гигабайта base64, которые надо собрать в памяти страницы и
+        // протащить через отладочный протокол. Замер 02.10.2026: запись 9:36
+        // была готова за 295 с, после чего пятнадцать минут тишины и
+        // `Render timeout` — рендер отработал, а видео не доехало.
+        //
+        // Тело запроса — сам blob: браузер отдаёт его потоком, base64 не
+        // появляется вовсе. `fetch` здесь уже настоящий: подмены времени и
+        // сети сняты выше, в finally.
+        if (config.uploadUrl) {
+            const response = await fetch(config.uploadUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': blob.type || 'video/webm' },
+                body: blob,
+            });
+            if (!response.ok) {
+                throw new Error(`Не вышло отдать запись серверу: HTTP ${response.status}`);
+            }
+            return { uploaded: true, bytes: blob.size, frames: frameCount, mime: blob.type };
+        }
+
+        // Запасной путь — прежняя строка. Нужен, пока у кого-то старый сервер:
+        // он про загрузку не знает и uploadUrl не пришлёт.
+        return await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+        });
     }
 
     window.startHeadlessRender = async (config) => {

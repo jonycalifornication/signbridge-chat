@@ -4,6 +4,7 @@ import express from 'express';
 import cors from 'cors';
 import puppeteer from 'puppeteer';
 import { exec, spawn } from 'child_process';
+import { pipeline } from 'stream/promises';
 import path from 'path';
 import fs from 'fs';
 import { promisify } from 'util';
@@ -515,6 +516,9 @@ async function injectRenderer(page) {
  */
 async function generateVideoCore(glosses, avatar, background, userAgent, onProgress = null, planning = {}) {
     let browser;
+    // Ключ приёмника записи. Объявлен ЗДЕСЬ, а не у места использования:
+    // его снимает finally, а он видит только внешнюю область.
+    let recordingId = null;
     try {
         if(onProgress) onProgress(5, 'Прогреваем видеопроцессоры...');
 
@@ -612,7 +616,28 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
 
         if(onProgress) onProgress(20, 'Анализируем текст и подбираем жесты 🧠');
         console.log(`[Server] Starting recording...`);
-        
+
+        // Куда страница сдаст запись и под каким именем файл ляжет на диск.
+        // Имя заводим ДО рендера: страница грузит байты сама, и к моменту, как
+        // `evaluate` вернётся, файл уже лежит.
+        const requestId = Date.now() + Math.floor(Math.random() * 1000);
+        const webmPath = path.join(TEMP_DIR, `render_${requestId}.webm`);
+        recordingId = crypto.randomUUID();
+        let recordingResolve;
+        let recordingReject;
+        const recordingUploaded = new Promise((resolve, reject) => {
+            recordingResolve = resolve;
+            recordingReject = reject;
+        });
+        // Отказ ловим здесь же: иначе непрочитанный reject всплывёт как
+        // unhandledRejection и уронит процесс воркера.
+        recordingUploaded.catch(() => {});
+        pendingRecordings.set(recordingId, {
+            path: webmPath,
+            resolve: recordingResolve,
+            reject: recordingReject,
+        });
+
         let renderTimer;
         let dataUrl;
         try {
@@ -620,6 +645,7 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                 page.evaluate(async (config) => {
                     return await window.startHeadlessRender(config);
                 }, {
+                    uploadUrl: `${SELF_URL}/internal/recording/${recordingId}`,
                     glosses,
                     avatar,
                     background,
@@ -653,25 +679,30 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
             clearTimeout(renderTimer);
         }
 
+        if(onProgress) onProgress(80, 'Упаковываем магию в пиксели...');
+
+        if (dataUrl && typeof dataUrl === 'object' && dataUrl.uploaded) {
+            // Файл уже на диске — страница отдала его потоком, пока шёл
+            // `evaluate`. Ждём промис на случай, если ответ опередил запись.
+            const bytes = await recordingUploaded;
+            console.log(`[Server] Запись на диске: ${Math.round(bytes / 1048576)} МБ, кадров ${dataUrl.frames}`);
+            return { webmPath, mp4Path: null, sendWebM: true };
+        }
+
+        // Старый путь: страница вернула dataURL (сервер новый, скрипт в кеше
+        // браузера старый — бывает только между выкладками).
         if (!dataUrl || typeof dataUrl !== 'string') {
             throw new Error('Render failed: no data returned from browser');
         }
-
-        if(onProgress) onProgress(80, 'Упаковываем магию в пиксели...');
-
         const base64Data = dataUrl.split(',')[1];
         const buffer = Buffer.from(base64Data, 'base64');
-
-        const requestId = Date.now() + Math.floor(Math.random() * 1000);
-        const webmPath = path.join(TEMP_DIR, `render_${requestId}.webm`);
-        const mp4Path = path.join(TEMP_DIR, `render_${requestId}.mp4`);
-
         await fs.promises.writeFile(webmPath, buffer);
 
         console.log(`[Server] Using raw WebM output (skipping FFmpeg conversion).`);
         return { webmPath, mp4Path: null, sendWebM: true };
 
     } finally {
+        if (recordingId) pendingRecordings.delete(recordingId);
         if (browser) await browser.close();
     }
 }
@@ -838,6 +869,37 @@ async function pipeFromOwner(req, res, url) {
     }
     res.end();
 }
+
+/**
+ * Куда страница сдаёт записанное видео.
+ *
+ * Раньше webm возвращался из `page.evaluate` одной base64-строкой. На коротком
+ * ролике это незаметно, а на девяти минутах (~250 МБ) даёт треть гигабайта
+ * строки, которую надо собрать в памяти страницы и протащить через отладочный
+ * протокол. Замер 02.10.2026: запись 9:36 была готова за 295 с, после чего
+ * пятнадцать минут тишины и `Render timeout` — рендер отработал, а видео не
+ * доехало. Обычная загрузка тех же байт идёт потоком и упирается только в диск.
+ *
+ * Ключ одноразовый и живёт в памяти ровно одного рендера: наружу /internal
+ * nginx не отдаёт, но принимать чужие записи по угаданному пути незачем.
+ */
+const pendingRecordings = new Map();
+
+app.post('/internal/recording/:id', async (req, res) => {
+    const entry = pendingRecordings.get(req.params.id);
+    if (!entry) return res.status(404).json({ error: 'unknown_recording' });
+    pendingRecordings.delete(req.params.id);
+    try {
+        await pipeline(req, fs.createWriteStream(entry.path));
+        const { size } = await fs.promises.stat(entry.path);
+        console.log(`[Server] Запись принята: ${path.basename(entry.path)}, ${Math.round(size / 1048576)} МБ`);
+        entry.resolve(size);
+        res.json({ status: 'ok', bytes: size });
+    } catch (err) {
+        entry.reject(err);
+        res.status(500).json({ error: err.message });
+    }
+});
 
 /**
  * Свободен ли этот воркер. Спрашивают только соседи, по внутренней сети;
