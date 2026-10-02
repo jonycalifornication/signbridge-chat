@@ -362,6 +362,15 @@ async function prepareRenderPlan(glosses, hasGPU, onProgress = null, mode = 'nor
 /**
  * Prune cache to stay under limit (LRU)
  */
+/** Готовое видео в кеше: mp4 у новых рендеров, webm у снятых раньше. */
+function cachedVideo(cacheKey) {
+    for (const ext of ['mp4', 'webm']) {
+        const candidate = path.join(CACHE_DIR, `${cacheKey}.${ext}`);
+        if (fs.existsSync(candidate)) return candidate;
+    }
+    return null;
+}
+
 async function pruneCache() {
     try {
         const files = await fs.promises.readdir(CACHE_DIR);
@@ -485,6 +494,12 @@ async function apiKeyAuth(req, res, next) {
 
 const MUXER_LOCAL_PATH = path.join(__dirname, '../../node_modules/webm-muxer/build/webm-muxer.js');
 const MUXER_CDN_URL = 'https://cdn.jsdelivr.net/npm/webm-muxer@5.0.2/build/webm-muxer.js';
+// Второй мукс — mp4. Видео отдаём в нём: mp4 открывает что угодно, включая
+// телефоны и монтажные программы, а webm половина из них не берёт вовсе.
+// Перекодировки это не стоит — H.264 кодирует тот же браузерный энкодер, что
+// писал VP8 (на боксе поддержаны avc1.4d0028 и avc1.640028).
+const MP4_MUXER_LOCAL_PATH = path.join(__dirname, '../../node_modules/mp4-muxer/build/mp4-muxer.js');
+const MP4_MUXER_CDN_URL = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js';
 const INJECT_RENDERER_PATH = path.join(__dirname, '../headless/inject-renderer.js');
 const SUBTITLES_PATH = path.join(__dirname, '../headless/subtitles.js');
 
@@ -502,6 +517,13 @@ async function injectRenderer(page) {
     } else {
         console.warn('[Server] webm-muxer not found in node_modules — falling back to CDN. Run `npm install`.');
         await page.addScriptTag({ url: MUXER_CDN_URL });
+    }
+
+    if (fs.existsSync(MP4_MUXER_LOCAL_PATH)) {
+        await page.addScriptTag({ path: MP4_MUXER_LOCAL_PATH });
+    } else {
+        console.warn('[Server] mp4-muxer not found in node_modules — falling back to CDN. Run `npm install`.');
+        await page.addScriptTag({ url: MP4_MUXER_CDN_URL });
     }
 
     // Субтитры лежат отдельным файлом, а не внутри рендера: так их можно
@@ -662,14 +684,19 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
         const base64Data = dataUrl.split(',')[1];
         const buffer = Buffer.from(base64Data, 'base64');
 
+        // Контейнер выбирает страница (mp4, если браузер умеет H.264), и
+        // называет его в самом dataURL. Расширение файла должно совпасть:
+        // по нему и плеер, и наш же срез подписи понимают, что внутри.
+        const mime = /^data:([^;,]+)/.exec(dataUrl)?.[1] || 'video/webm';
+        const ext = mime === 'video/mp4' ? 'mp4' : 'webm';
+
         const requestId = Date.now() + Math.floor(Math.random() * 1000);
-        const webmPath = path.join(TEMP_DIR, `render_${requestId}.webm`);
-        const mp4Path = path.join(TEMP_DIR, `render_${requestId}.mp4`);
+        const videoPath = path.join(TEMP_DIR, `render_${requestId}.${ext}`);
 
-        await fs.promises.writeFile(webmPath, buffer);
+        await fs.promises.writeFile(videoPath, buffer);
 
-        console.log(`[Server] Using raw WebM output (skipping FFmpeg conversion).`);
-        return { webmPath, mp4Path: null, sendWebM: true };
+        console.log(`[Server] Готово: ${path.basename(videoPath)}, ${Math.round(buffer.length / 1048576)} МБ`);
+        return { videoPath, ext, mime };
 
     } finally {
         if (browser) await browser.close();
@@ -693,27 +720,28 @@ app.post('/api/v1/video/generate', rateLimit, apiKeyAuth, async (req, res) => {
     let acquired = false;
     try {
         const cacheKey = getCacheKey({ glosses, avatar, background, mode, ...hints });
-        const cachePath = path.join(CACHE_DIR, `${cacheKey}.webm`);
-        
-        if (fs.existsSync(cachePath)) {
+        // В кеше может лежать и mp4 (новые рендеры), и webm (всё, что сняли до
+        // перехода). Ищем оба: старый файл отдать можно, перерисовывать его
+        // ради контейнера незачем.
+        const cached = cachedVideo(cacheKey);
+        if (cached) {
             console.log(`[Cache v1] Hit for key: ${cacheKey}`);
-            return res.download(cachePath, 'animation.webm');
+            return res.download(cached, `animation${path.extname(cached)}`);
         }
 
         await renderSemaphore.acquire();
         acquired = true;
         const result = await generateVideoCore(glosses, avatar, background, userAgent, null, { mode, ...hints });
-        const sendPath = result.sendWebM ? result.webmPath : result.mp4Path;
-        const filename = result.sendWebM ? 'animation.webm' : 'animation.mp4';
 
         // Save to cache after successful v1 render too
-        await fs.promises.copyFile(result.webmPath, cachePath).catch(() => {});
+        await fs.promises
+            .copyFile(result.videoPath, path.join(CACHE_DIR, `${cacheKey}.${result.ext}`))
+            .catch(() => {});
         await pruneCache();
 
-        res.download(sendPath, filename, async (err) => {
+        res.download(result.videoPath, `animation.${result.ext}`, async () => {
             try {
-                if (result.webmPath && fs.existsSync(result.webmPath)) await fs.promises.unlink(result.webmPath);
-                if (result.mp4Path && fs.existsSync(result.mp4Path)) await fs.promises.unlink(result.mp4Path);
+                if (fs.existsSync(result.videoPath)) await fs.promises.unlink(result.videoPath);
             } catch (cleanupErr) {
                 console.error('[Server v1] Cleanup error:', cleanupErr);
             }
@@ -1047,12 +1075,12 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
         try {
             // --- Caching Layer ---
             const cacheKey = getCacheKey({ glosses, avatar, background, mode, ...hints });
-            const cachePath = path.join(CACHE_DIR, `${cacheKey}.webm`);
-            
-            if (fs.existsSync(cachePath)) {
+            const cachePath = cachedVideo(cacheKey);
+
+            if (cachePath) {
                 console.log(`[Cache] Hit for key: ${cacheKey}`);
                 task.finalFilePath = cachePath;
-                task.downloadUrl = `/api/v1/video/cache/${cacheKey}.webm`;
+                task.downloadUrl = `/api/v1/video/cache/${path.basename(cachePath)}`;
                 task.status = 'completed';
                 task.progress = 100;
                 task.message = 'Готово (из кэша)!';
@@ -1127,7 +1155,7 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
             
             // Save to Cache for next time
             try {
-                await fs.promises.copyFile(result.webmPath, cachePath);
+                await fs.promises.copyFile(result.videoPath, path.join(CACHE_DIR, `${cacheKey}.${result.ext}`));
                 console.log(`[Cache] Saved new entry: ${cacheKey}`);
                 await pruneCache();
             } catch (cacheErr) {
@@ -1135,9 +1163,9 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
             }
 
 
-            task.finalFilePath = result.sendWebM ? result.webmPath : result.mp4Path;
-            task.otherFilePath = result.sendWebM ? result.mp4Path : result.webmPath;
-            task.downloadUrl = `/api/v1/video/cache/${cacheKey}.webm`;
+            task.finalFilePath = result.videoPath;
+            task.otherFilePath = null;
+            task.downloadUrl = `/api/v1/video/cache/${cacheKey}.${result.ext}`;
             task.status = 'completed';
             
             // AUTO UPDATE SESSIONS FILE
@@ -1449,7 +1477,7 @@ app.get('/api/v1/video/download/:taskId', async (req, res) => {
         return res.status(404).json({ error: 'File not ready or expired' });
     }
 
-    const filename = task.finalFilePath.endsWith('.webm') ? 'animation.webm' : 'animation.mp4';
+    const filename = `animation${path.extname(task.finalFilePath) || '.webm'}`;
     if (req.query.subtitles !== '0' || !task.subtitles) {
         return res.download(task.finalFilePath, filename);
     }
@@ -1609,7 +1637,7 @@ async function smokeTestMirror(variant) {
         { mirrorVariant: variant, mode: 'normal' },
     );
 
-    const filePath = result.sendWebM ? result.webmPath : result.mp4Path;
+    const filePath = result.videoPath;
     const { size } = await fs.promises.stat(filePath);
     await fs.promises.unlink(filePath).catch(() => {});
 
