@@ -695,6 +695,26 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
 
         await fs.promises.writeFile(videoPath, buffer);
 
+        // moov в начало файла. Страница пишет его в конец: собирать mp4 в
+        // памяти по ходу записи она умеет, но тем медленнее, чем длиннее
+        // кусок (на 5195 кадрах съёмка падала с 51 кадра/с до 11.5).
+        // Перекладка контейнера `-c copy` — секунды и без перекодирования,
+        // зато файл начинает играть, не скачавшись целиком.
+        if (ext === 'mp4') {
+            const started = Date.now();
+            const faststart = videoPath.replace(/\.mp4$/, '.faststart.mp4');
+            try {
+                await runFfmpeg(['-y', '-i', videoPath, '-c', 'copy', '-movflags', '+faststart', faststart]);
+                await fs.promises.rename(faststart, videoPath);
+                console.log(`[Server] moov в начале за ${((Date.now() - started) / 1000).toFixed(1)} с`);
+            } catch (err) {
+                // Не вышло — отдаём как есть: файл валиден, просто начинает
+                // играть после полной загрузки.
+                console.warn('[Server] Переложить moov не вышло:', err.message);
+                await fs.promises.unlink(faststart).catch(() => {});
+            }
+        }
+
         console.log(`[Server] Готово: ${path.basename(videoPath)}, ${Math.round(buffer.length / 1048576)} МБ`);
         return { videoPath, ext, mime };
 
