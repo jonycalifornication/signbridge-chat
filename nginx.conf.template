@@ -36,11 +36,11 @@ server {
 
   # --- Renderer endpoints (video generation + sessions) ---
 
-  # Статус и скачивание — строго тому воркеру, который задачу начал.
+  # Статус, скачивание и отмена — строго тому воркеру, который задачу начал.
   # resolver нужен потому, что адрес берётся из переменной: без него nginx
   # пытался бы разрешить имя один раз при старте и падал, если воркер ещё
   # не поднялся.
-  location ~ ^/api/v1/video/(status|download)/(?<taskid>[^/]+) {
+  location ~ ^/api/v1/video/(status|download|cancel)/(?<taskid>[^/]+) {
     resolver 127.0.0.11 valid=10s ipv6=off;
     set $owner $task_owner;
     proxy_pass http://$owner$request_uri;

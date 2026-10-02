@@ -588,6 +588,10 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null
         });
 
+        // Браузер наружу: отмена задачи закрывает именно его — `evaluate`
+        // тогда падает, рендер прекращается, слот освобождается.
+        if (typeof planning.onBrowserReady === 'function') planning.onBrowserReady(browser);
+
         const page = await browser.newPage();
         
         if (onProgress) {
@@ -871,13 +875,15 @@ async function pipeFromOwner(req, res, url) {
  * Свободен ли этот воркер. Спрашивают только соседи, по внутренней сети;
  * nginx наружу /internal не отдаёт.
  */
-app.get('/internal/slots', (_req, res) => {
+app.get('/internal/slots', async (_req, res) => {
     res.json({
         worker: WORKER_ID || null,
         free: workerIsFree(),
         active: renderSemaphore.active,
         inFlight: tasksInFlight(),
         queued: renderSemaphore.waiting.length,
+        // Занятость карты: по ней сосед решает, стоит ли отдавать работу.
+        gpu: await gpuLoad(),
     });
 });
 
@@ -887,7 +893,45 @@ app.get('/internal/slots', (_req, res) => {
  * Опрашиваем всех разом и берём первого ответившего «свободен»: опрос дешёвый,
  * а последовательный обход добавлял бы к каждому куску секунды ожидания.
  */
-async function findFreePeer() {
+/**
+ * Загрузка СВОЕЙ видеокарты в процентах.
+ *
+ * Нужна, потому что карт четыре, а работают на них не только мы: на нулевой
+ * живёт глоссер и временами обучает модель. Цикл съёмки на каждом кадре ждёт
+ * `gl.finish()`, то есть встаёт в очередь за чужими вычислениями — замер
+ * 02.10.2026: один и тот же кусок шёл 90 с на свободной карте и 452 с на той,
+ * где считалось обучение. Раньше про это никто не знал: задачу раздавали по
+ * числу соединений и по числу чужих задач, а не по занятости карты.
+ *
+ * Контейнер видит только свои карты (`NVIDIA_VISIBLE_DEVICES`), поэтому первая
+ * строка `nvidia-smi` — это и есть та, на которой мы рисуем. Кэш на три
+ * секунды: соседи спрашивают часто, а запуск nvidia-smi не бесплатный.
+ */
+let gpuLoadCache = { at: 0, value: null };
+
+async function gpuLoad() {
+    if (Date.now() - gpuLoadCache.at < 3000) return gpuLoadCache.value;
+    let value = null;
+    try {
+        const { stdout } = await execPromise(
+            'nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits',
+            { timeout: 2000 },
+        );
+        const first = Number.parseInt(String(stdout).trim().split('\n')[0], 10);
+        if (Number.isFinite(first)) value = first;
+    } catch {
+        /* нет nvidia-smi (CPU-рендер) — считаем, что про карту ничего не знаем */
+    }
+    gpuLoadCache = { at: Date.now(), value };
+    return value;
+}
+
+/** Выше этого считаем, что на карте работает кто-то ещё. */
+const GPU_BUSY_PERCENT = 45;
+/** Насколько сосед должен быть свободнее, чтобы отдавать ему работу. */
+const GPU_BETTER_BY = 20;
+
+async function findFreePeer(maxGpuLoad = null) {
     if (WORKER_PEERS.length === 0) return null;
     const probes = WORKER_PEERS.map(async (base) => {
         try {
@@ -896,18 +940,31 @@ async function findFreePeer() {
             });
             if (!resp.ok) return null;
             const data = await resp.json();
-            return data?.free ? base : null;
+            return data?.free ? { base, gpu: typeof data.gpu === 'number' ? data.gpu : null } : null;
         } catch {
             return null;
         }
     });
     const results = (await Promise.all(probes)).filter(Boolean);
     if (results.length === 0) return null;
-    // Из свободных берём СЛУЧАЙНОГО, а не первого: при одновременных кусках
-    // все занятые воркеры опрашивают соседей разом, видят один и тот же
-    // список и отдают работу одному и тому же — он потом стоит с очередью,
-    // пока другие простаивают.
-    return results[Math.floor(Math.random() * results.length)];
+    // Среди свободных берём того, у кого карта свободнее: «свободен» у соседа
+    // значит «нет моих задач», а карту у него может занимать обучение.
+    // Отдаём работу из-за занятой карты только тому, у кого она заметно
+    // свободнее: иначе кусок будет кочевать по кругу между равными соседями.
+    const eligible = maxGpuLoad === null
+        ? results
+        : results.filter((peer) => peer.gpu !== null && peer.gpu <= maxGpuLoad);
+    if (eligible.length === 0) return null;
+    const known = eligible.filter((peer) => peer.gpu !== null);
+    if (known.length > 0) {
+        known.sort((a, b) => a.gpu - b.gpu);
+        const best = known[0].gpu;
+        // Между одинаково свободными — случайный: иначе все занятые воркеры
+        // разом отдадут работу одному и тому же, и он встанет с очередью.
+        const tied = known.filter((peer) => peer.gpu <= best + 5);
+        return tied[Math.floor(Math.random() * tied.length)].base;
+    }
+    return eligible[Math.floor(Math.random() * eligible.length)].base;
 }
 
 app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res) => {
@@ -1105,11 +1162,20 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
             // своему воркеру, и на хвосте одна карта работала, а соседние
             // простаивали. Клиент при этом ничего не замечает: номер задачи
             // прежний, а статус и файл мы проксируем тому, кто считает.
+            //
+            // Сторожим и второй случай: мы свободны, но на нашей карте считает
+            // кто-то чужой (обучение глоссера живёт на нулевой). Тогда работу
+            // тоже лучше отдать — соседу со свободной картой тот же кусок
+            // достаётся впятеро быстрее.
             let migration = null;
-            if (!renderSemaphore.free && WORKER_PEERS.length > 0) {
+            const ourGpu = await gpuLoad();
+            const gpuCrowded = typeof ourGpu === 'number' && ourGpu >= GPU_BUSY_PERCENT;
+            if ((!renderSemaphore.free || gpuCrowded) && WORKER_PEERS.length > 0) {
                 migration = setInterval(async () => {
                     if (task.status !== 'processing' || task.movedTo) return;
-                    const peer = await findFreePeer();
+                    const peer = await findFreePeer(
+                        gpuCrowded && renderSemaphore.free ? ourGpu - GPU_BETTER_BY : null,
+                    );
                     // Пока спрашивали соседей, могли начать считать сами —
                     // тогда отдавать нельзя: получится два рендера одного
                     // куска на двух картах.
@@ -1143,6 +1209,12 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
                 renderSemaphore.release();
                 return;
             }
+            // Пока стояли в очереди, задачу могли отменить — тогда слот
+            // отдаём сразу, не запуская браузер.
+            if (task.cancelled) {
+                renderSemaphore.release();
+                return;
+            }
             task.startedLocally = true;
             acquired = true;
 
@@ -1150,6 +1222,7 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
                 renderPlan: task.renderPlan,
                 renderTimeoutMs: task.renderTimeoutMs,
                 mode: mode,
+                onBrowserReady: (instance) => { task.browser = instance; },
                 ...hints
             });
             
@@ -1189,7 +1262,9 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
         } catch (err) {
             console.error(`[Server v2] Task ${taskId} failed:`, err);
             task.status = 'error';
-            task.errorMessage = err.message;
+            // Отменённая задача падает закрытым браузером — человеку про это
+            // знать незачем, он сам нажал «остановить».
+            task.errorMessage = task.cancelled ? 'Отменено' : err.message;
             if (task.sseResponse) {
                 task.sseResponse.write(`data: ${JSON.stringify({ error: err.message, progress: 0 })}\n\n`);
                 task.sseResponse.end();
@@ -1445,6 +1520,47 @@ async function cropOffSubtitles(source, target, webm) {
         await fs.promises.rm(work, { recursive: true, force: true }).catch(() => {});
     }
 }
+
+/**
+ * Отмена задачи.
+ *
+ * До этого «остановить» на портале значило «перестать ждать»: клиент бросал
+ * опрос, а карта продолжала считать кусок, который уже никому не нужен — до
+ * конца рендера или до таймаута в двадцать минут. Теперь закрываем браузер
+ * задачи: `evaluate` падает, рендер прекращается, слот семафора освобождается
+ * и достаётся следующему в очереди.
+ */
+app.post('/api/v1/video/cancel/:taskId', async (req, res) => {
+    const taskId = req.params.taskId;
+    const task = tasks.get(taskId);
+
+    if (task?.movedTo) {
+        return pipeFromOwner(req, res, `${task.movedTo.base}/api/v1/video/cancel/${task.movedTo.taskId}`)
+            .catch(() => res.status(502).json({ error: 'owner_unreachable' }));
+    }
+    if (!task) {
+        const owner = await ownerOf(taskId);
+        if (owner) {
+            return pipeFromOwner(req, res, `${owner}/api/v1/video/cancel/${taskId}`)
+                .catch(() => res.status(502).json({ error: 'owner_unreachable' }));
+        }
+        return res.status(404).json({ error: 'Task not found' });
+    }
+    if (task.status === 'completed') {
+        return res.json({ status: 'already_done' });
+    }
+
+    task.cancelled = true;
+    console.log(`[Server] Задача ${taskId} отменена`);
+    if (task.browser) {
+        try {
+            await task.browser.close();
+        } catch {
+            /* уже закрыт */
+        }
+    }
+    res.json({ status: 'ok' });
+});
 
 /**
  * v2: Final Download Endpoint 
