@@ -411,6 +411,79 @@
          *  неверная догадка о сцене: выключаем, чтобы не рендерить всё дважды. */
         const GUARD_GIVE_UP_SHARE = 0.25;
         const GUARD_GIVE_UP_AFTER = 300;
+        /** Номер кадра three.js на прошлом витке. Счётчик отрисовок живёт до
+         *  следующего `render()`, поэтому виток, на котором виджет не рисовал
+         *  вовсе, читает ПРОШЛОЕ значение и проходит сторожа как нормальный.
+         *  Такие витки в статистику не кладём — иначе сводка «всегда 14»
+         *  считает эхо за измерение. */
+        let lastRenderFrame = -1;
+        let framesWithoutRender = 0;
+
+        /*
+         * Второй сторож — ПИКСЕЛЬНЫЙ, на уже снятом кадре.
+         *
+         * Первый считает отрисовки, то есть команды, которые JS выдал
+         * видеокарте. Всё, что ниже — исполнение, резолв мультисэмпла, снимок
+         * холста — для него невидимо: кадр с четырнадцатью отрисовками может
+         * приехать в энкодер недорисованным, и счётчик скажет «норма». Ровно
+         * так и вышло: 102 398 кадров подряд ровно по 14 отрисовок, а пиджак
+         * на кадре всё равно пропал.
+         *
+         * Сравнивать кадр с ПРЕДЫДУЩИМ нельзя. Выброс по порогу «во столько-то
+         * раз больше обычного движения» прячет ровно тот случай, ради которого
+         * всё затевалось: пиджак занимает четверть кадра, а во время жеста
+         * соседние кадры и так расходятся сильно — порог оказывается выше
+         * пропажи. Проверено тестом, он на этом и падал.
+         *
+         * Поэтому сверяем снимок с ХОЛСТОМ, С КОТОРОГО ОН СНЯТ. Между снимком
+         * и сверкой никто не рисует, а `preserveDrawingBuffer` у записи включён
+         * (widget/index.js, ветка `?record=1`) — значит холст обязан показывать
+         * ровно то же самое. Любое расхождение означает, что снимок взят не с
+         * того состояния, и это уже не зависит ни от движения, ни от сцены.
+         *
+         * Если холст не совпал — снимаем ещё раз и оставляем тот снимок,
+         * который ближе к холсту. Холст здесь истина: он дорисован, его ждал
+         * `finish()`.
+         */
+        const THUMB = 32;
+        // Сторож не должен иметь права уронить запись: холст заводим отдельно
+        // и при неудаче просто остаёмся без проверки.
+        let thumbCtx = null;
+        try {
+            thumbCtx = new OffscreenCanvas(THUMB, THUMB).getContext('2d', { willReadFrequently: true });
+        } catch (e) {
+            console.warn('[Headless] Пиксельный сторож недоступен:', e && e.message);
+        }
+        /** Уменьшенная копия: 3072 числа, сравнивать дёшево. */
+        const thumbOf = (source) => {
+            thumbCtx.drawImage(source, 0, 0, THUMB, THUMB);
+            return thumbCtx.getImageData(0, 0, THUMB, THUMB).data;
+        };
+        /** Среднее расхождение двух копий, 0..255 на канал. */
+        const thumbDiff = (a, b) => {
+            let sum = 0;
+            for (let i = 0; i < a.length; i += 4) {
+                sum += Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+            }
+            return sum / (a.length / 4 * 3);
+        };
+        /** Допуск на само уменьшение: холст и ImageBitmap приходят в drawImage
+         *  разными путями, и фильтрация может дать расхождение в единицы. Любая
+         *  настоящая пропажа на порядок больше: пиджак в четверть кадра на
+         *  зелёном фоне даёт около 24, рукав — около 6. */
+        const TEAR_EPSILON = 2;
+        let tornSuspects = 0;
+        let tornConfirmed = 0;
+        let tornWorstDiff = 0;
+        let thumbNoiseSum = 0;
+        let thumbNoiseCount = 0;
+        let pixelGuardOff = thumbCtx === null;
+        /** Та же страховка, что у сторожа отрисовок: если «не совпало» на
+         *  каждом четвёртом кадре, это наша неверная догадка, а не сбой, и
+         *  удваивать работу на всю лекцию нельзя. */
+        const PIXEL_GIVE_UP_SHARE = 0.25;
+        const PIXEL_GIVE_UP_AFTER = 300;
+
         // Сколько секунд видео ждём — заполняется, когда известна
         // последовательность (до начала записи). 0 = посчитать не вышло.
         let expectedSeconds = 0;
@@ -539,8 +612,13 @@
                     if (isEncoding) {
                         // Меш мог не доехать до кадра — проверяем по числу
                         // отрисовок и, если их меньше обычного, рисуем ещё раз.
-                        if (!guardOff && widget.renderer.info && widget.renderer.info.render) {
-                            const calls = widget.renderer.info.render.calls;
+                        const renderInfo = widget.renderer.info && widget.renderer.info.render;
+                        // Виток без отрисовки читал бы счётчик прошлого кадра.
+                        const drewThisTick = !renderInfo || renderInfo.frame !== lastRenderFrame;
+                        if (renderInfo) lastRenderFrame = renderInfo.frame;
+                        if (!drewThisTick) framesWithoutRender++;
+                        if (!guardOff && drewThisTick && renderInfo) {
+                            const calls = renderInfo.calls;
                             callCounts.set(calls, (callCounts.get(calls) || 0) + 1);
                             if (frameCount < GUARD_WARMUP_FRAMES) {
                                 if (calls > expectedCalls) expectedCalls = calls;
@@ -551,7 +629,7 @@
                                 let after = calls;
                                 try {
                                     widget.renderer.render(widget.scene, widget.camera);
-                                    after = widget.renderer.info.render.calls;
+                                    after = renderInfo.calls;
                                 } catch (e) {
                                     console.warn('[Headless] Перерисовать кадр не вышло:', e && e.message);
                                 }
@@ -584,7 +662,56 @@
                         // ролике в 34 с: провалов было 12 из 1025 кадров, стало
                         // 0 из 1027, а время записи не выросло (30 с).
                         widget.renderer.getContext().finish();
-                        const bitmap = await createImageBitmap(widget.renderer.domElement);
+                        let bitmap = await createImageBitmap(widget.renderer.domElement);
+
+                        // Снимок мог застать холст на середине — сверяем
+                        // кадр с холстом, с которого он снят.
+                        if (!pixelGuardOff) {
+                            try {
+                                const shot = thumbOf(bitmap);
+                                const canvasNow = thumbOf(widget.renderer.domElement);
+                                const drift = thumbDiff(shot, canvasNow);
+                                thumbNoiseSum += drift;
+                                thumbNoiseCount++;
+                                if (drift > TEAR_EPSILON) {
+                                    tornSuspects++;
+                                    if (drift > tornWorstDiff) tornWorstDiff = drift;
+                                    const again = await createImageBitmap(widget.renderer.domElement);
+                                    // Оставляем тот снимок, который ближе к
+                                    // холсту: холст дорисован, его ждал finish().
+                                    if (thumbDiff(thumbOf(again), canvasNow) < drift) {
+                                        tornConfirmed++;
+                                        bitmap.close();
+                                        bitmap = again;
+                                        if (tornConfirmed <= 10) {
+                                            console.warn(
+                                                `[Headless] Кадр ${frameCount} (${(frameCount / FRAMERATE).toFixed(2)} с) снят не с того состояния: расхождение с холстом ${drift.toFixed(1)}, пересняли`
+                                            );
+                                        }
+                                    } else {
+                                        again.close();
+                                    }
+                                    if (
+                                        frameCount >= PIXEL_GIVE_UP_AFTER &&
+                                        tornSuspects > frameCount * PIXEL_GIVE_UP_SHARE
+                                    ) {
+                                        pixelGuardOff = true;
+                                        console.warn(`[Headless] Пиксельный сторож выключен: не совпало ${tornSuspects} из ${frameCount} — так расходится само уменьшение, а не кадр`);
+                                    }
+                                }
+                            } catch (e) {
+                                // Нет OffscreenCanvas или чтение не удалось —
+                                // запись важнее проверки.
+                                pixelGuardOff = true;
+                                console.warn('[Headless] Пиксельный сторож выключен:', e && e.message);
+                            }
+                        }
+
+                        // Пересъёмка сторожей тоже двигает счётчик кадров
+                        // three.js — равняемся на состояние ПОСЛЕ них, иначе
+                        // следующий виток без отрисовки прошёл бы как рисующий.
+                        if (renderInfo) lastRenderFrame = renderInfo.frame;
+
                         let source = bitmap;
                         if (subtitles) {
                             try { source = subtitles.compose(bitmap); } catch (e) { source = bitmap; }
@@ -738,7 +865,15 @@
                 `[Headless] Отрисовок за кадр: ${spread || 'нет данных'}; обычно ${expectedCalls}. ` +
                 `Коротких кадров ${shortFrames} (${frameCount ? (shortFrames * 100 / frameCount).toFixed(3) : '0'}%), ` +
                 `переснимок помог ${recoveredFrames}, не помог ${stubbornFrames}` +
+                (framesWithoutRender ? `, витков без отрисовки ${framesWithoutRender}` : '') +
                 (guardOff ? ' — сторож был выключен по ходу записи' : '')
+            );
+            const noise = thumbNoiseCount ? thumbNoiseSum / thumbNoiseCount : 0;
+            console.log(
+                `[Headless] Снимок против холста: не совпало ${tornSuspects} из ${thumbNoiseCount}` +
+                ` (${thumbNoiseCount ? (tornSuspects * 100 / thumbNoiseCount).toFixed(3) : '0'}%), ` +
+                `пересняли ${tornConfirmed}, худшее расхождение ${tornWorstDiff.toFixed(1)}, фоновое ${noise.toFixed(2)}` +
+                (pixelGuardOff ? ' — пиксельный сторож был выключен' : '')
             );
         }
         reportProgress(90, 'Упаковываем нейро-магию в контейнер...');
