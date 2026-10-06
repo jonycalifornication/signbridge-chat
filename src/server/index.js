@@ -342,6 +342,28 @@ function resolveEncoderMaxQueueSize(hasGPU) {
     return Math.max(1, Math.min(parsed, 256));
 }
 
+/**
+ * Сверять ли КАЖДЫЙ снятый кадр с холстом (`FRAME_AUDIT=1`).
+ *
+ * По умолчанию выключено, и это не осторожность, а замер. Проверка читает
+ * кадр обратно из видеопамяти дважды, и обратное чтение стоит дороже всей
+ * остальной записи: 136-193 кадра в секунду без неё против 32-33 с ней
+ * (1920×1536, H.264, ANGLE/EGL, 300 кадров, два прогона). На боксе это
+ * видно так же: 1306 кадров за 70 с вместо обычных 0.41 с рендера на
+ * секунду видео. Пятикратная цена превращает пятиминутный кусок в рендер
+ * длиннее своего же таймаута.
+ *
+ * Выборочно проверять нельзя: провал попадается раз на 30 000 кадров, и
+ * проверка каждого тридцатого ловила бы его раз в девятьсот записей. Либо
+ * каждый кадр, либо никакой — поэтому это прибор, который включают на один
+ * осознанный долгий прогон, чтобы ответить, рвётся ли снимок, а не постоянно
+ * работающий сторож.
+ */
+function resolveFrameAudit() {
+    const raw = String(process.env.FRAME_AUDIT || process.env.RENDER_FRAME_AUDIT || '').trim();
+    return raw === '1' || raw.toLowerCase() === 'true';
+}
+
 async function prepareRenderPlan(glosses, hasGPU, onProgress = null, mode = 'normal', alreadyGlossed = false) {
     const renderText = Array.isArray(glosses) ? glosses.join(' ') : String(glosses || '');
     let renderPlan = null;
@@ -668,7 +690,7 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                         ? planning.tailSeconds
                         : DEFAULT_TAIL_SECONDS,
                     subtitles: planning.subtitles || null,
-                    renderProfile: { hasGPU, encoderMaxQueueSize }
+                    renderProfile: { hasGPU, encoderMaxQueueSize, frameAudit: resolveFrameAudit() }
                 }),
                 new Promise((_, reject) => {
                     renderTimer = setTimeout(
