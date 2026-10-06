@@ -347,8 +347,37 @@
                 },
             });
 
+        /*
+         * БЕСПЛАТНЫЙ сторож пропавших кусков аватара.
+         *
+         * Сверять картинку попиксельно нельзя: обратное чтение кадра из
+         * видеопамяти стоит пятикратной скорости записи (замер — см.
+         * `resolveFrameAudit` в src/server/index.js). Но у нас уже есть число,
+         * которое ничего не стоит: РАЗМЕР закодированного кадра.
+         *
+         * Видео межкадровое. Кадр, с которого пропал пиджак, — это огромное
+         * изменение, и его P-кадр выходит аномально большим. Следующий кадр,
+         * где пиджак вернулся, — такой же большой. Обычное движение так себя
+         * не ведёт: оно меняет размер плавно. Поэтому ищем не отдельный
+         * выброс, а ДВА ПОДРЯД: это и есть подпись «пропало и вернулось».
+         *
+         * Ключевые кадры (каждый тридцатый) крупные по определению — их не
+         * считаем вовсе.
+         *
+         * Сторож не чинит кадр, он говорит, на какой секунде смотреть. Этого
+         * и не хватало: до сих пор провалы ловились глазами в готовом файле.
+         */
+        const chunkSizes = [];
         let videoEncoder = new VideoEncoder({
-            output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+            output: (chunk, meta) => {
+                if (chunk.type !== 'key') {
+                    chunkSizes.push({
+                        second: chunk.timestamp / 1_000_000,
+                        bytes: chunk.byteLength,
+                    });
+                }
+                muxer.addVideoChunk(chunk, meta);
+            },
             error: (e) => console.error('[Headless] VideoEncoder Error:', e),
         });
 
@@ -855,6 +884,37 @@
         const buffer = muxer.target.buffer;
         const blob = new Blob([buffer], { type: useMp4 ? 'video/mp4' : 'video/webm' });
 
+        /**
+         * Найти подозрительные кадры по размеру.
+         *
+         * Опорное значение — МЕДИАНА, а не среднее: один гигантский кадр
+         * утащил бы среднее за собой и спрятал сам себя. Подозрение — пара
+         * соседних кадров, каждый больше медианы в `factor` раз; одиночный
+         * всплеск это обычная смена жеста, а вот «скакнуло и тут же скакнуло
+         * обратно» объясняется только тем, что картинка на кадр изменилась и
+         * вернулась.
+         */
+        const findFrameSpikes = (sizes, factor) => {
+            if (sizes.length < 10) return [];
+            const sorted = sizes.map((x) => x.bytes).sort((a, b) => a - b);
+            const median = sorted[Math.floor(sorted.length / 2)] || 1;
+            const limit = median * factor;
+            const spikes = [];
+            for (let i = 1; i < sizes.length; i++) {
+                if (sizes[i - 1].bytes > limit && sizes[i].bytes > limit) {
+                    // Один провал даёт одну пару; подряд идущие пары — это
+                    // всё ещё он, а не несколько разных.
+                    const previous = spikes[spikes.length - 1];
+                    if (previous && sizes[i - 1].second - previous.second < 0.2) continue;
+                    spikes.push({
+                        second: sizes[i - 1].second,
+                        ratio: sizes[i - 1].bytes / median,
+                    });
+                }
+            }
+            return spikes;
+        };
+
         const recordingFinished = new Promise((resolve) => {
             const reader = new FileReader();
             reader.onloadend = () => resolve(reader.result);
@@ -873,6 +933,22 @@
                 (guardOff ? ' — сторож был выключен по ходу записи' : '')
             );
             const noise = thumbNoiseCount ? thumbNoiseSum / thumbNoiseCount : 0;
+            // Во сколько раз кадр должен обогнать медиану, чтобы считаться
+            // выбросом. Восемь — чтобы обычная смена жеста (она даёт двойной
+            // и тройной размер) не попадала, а пропажа большого меша попадала
+            // наверняка.
+            const SPIKE_FACTOR = 8;
+            const spikes = findFrameSpikes(chunkSizes, SPIKE_FACTOR);
+            if (spikes.length === 0) {
+                console.log(`[Headless] Подозрительных кадров нет (проверено ${chunkSizes.length} по размеру)`);
+            } else {
+                console.warn(
+                    `[Headless] ПОДОЗРИТЕЛЬНЫЕ КАДРЫ (${spikes.length}): ` +
+                    spikes.slice(0, 20).map((x) => `${x.second.toFixed(2)} с (×${x.ratio.toFixed(1)})`).join(', ') +
+                    (spikes.length > 20 ? ' …' : '') +
+                    ' — смотреть эти секунды в готовом файле'
+                );
+            }
             if (!frameAudit) console.log('[Headless] Снимок против холста: не проверялось (FRAME_AUDIT выключен)');
             else console.log(
                 `[Headless] Снимок против холста: не совпало ${tornSuspects} из ${thumbNoiseCount}` +
