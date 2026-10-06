@@ -333,8 +333,20 @@ function hasRendererGPU() {
     }
 }
 
+/**
+ * Сколько кадров энкодеру позволено держать в очереди.
+ *
+ * Было 256 на карте. Это гигабайты кадров 1920×1536, которые лежат в
+ * видеопамяти и ждут — вместе с `--enable-zero-copy` (его мы тоже убрали)
+ * это класс «кадр ещё ссылается на то, что уже переписали».
+ *
+ * Замер 06.10.2026 (1920×1536 → H.264 1280×1024, ANGLE/EGL, 400 кадров,
+ * по два прогона): очередь 256 даёт 170-187 к/с, очередь 16 — 184-190,
+ * очередь 4 — 184-193. То есть глубокая очередь не быстрее, а чуть
+ * МЕДЛЕННЕЕ: энкодер и так обгоняет рендер, и копить ему нечего.
+ */
 function resolveEncoderMaxQueueSize(hasGPU) {
-    const fallback = hasGPU ? 256 : 30;
+    const fallback = hasGPU ? 16 : 30;
     const rawValue = process.env.RENDER_ENCODER_MAX_QUEUE_SIZE || process.env.ENCODER_MAX_QUEUE_SIZE;
     const parsed = Number.parseInt(rawValue, 10);
 
@@ -605,7 +617,11 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                 // Required for headless GPU rendering
                 ...(hasGPU ? ['--enable-gpu', '--disable-gpu-sandbox', '--disable-software-rasterizer', '--ozone-platform=headless'] : []),
                 '--enable-gpu-rasterization',
-                '--enable-zero-copy',
+                // `--enable-zero-copy` убран намеренно. Он просит браузер не
+                // копировать текстуры, а делиться ими — для рекордера это
+                // неправильный размен: экономим копию, рискуем содержимым
+                // уже снятого кадра. Замер 06.10.2026: на скорость он не
+                // влияет вовсе (184-193 к/с с ним и без него).
                 '--ignore-gpu-blocklist',
                 `--unsafely-treat-insecure-origin-as-secure=${SELF_URL}`
             ],
