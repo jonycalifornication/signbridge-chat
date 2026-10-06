@@ -1,5 +1,7 @@
 import './load-env.js'; // must stay first: modules below read config at import time
 
+import { tasksInFlight as countTasksInFlight } from './task-slots.js';
+
 import express from 'express';
 import cors from 'cors';
 import puppeteer from 'puppeteer';
@@ -800,11 +802,7 @@ app.post('/api/v1/video/preview', rateLimit, apiKeyAuth, async (req, res) => {
  * тому, что все четыре оставались у одного воркера.
  */
 function tasksInFlight() {
-    let n = 0;
-    for (const task of tasks.values()) {
-        if (task.status !== 'completed' && task.status !== 'error') n += 1;
-    }
-    return n;
+    return countTasksInFlight(tasks);
 }
 
 /** Свободны ли мы прямо сейчас — для себя и для соседей. */
@@ -1182,6 +1180,14 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
                     task.movedTo = { base: peer, taskId: data.taskId };
                     task.message = 'Передано свободной карте...';
                     console.log(`[Миграция] Задача ${taskId} уехала к ${peer} (${why}): ${data.taskId}`);
+                    // Отдав работу, мы выходим из фоновой функции и до её
+                    // обычной уборки не доходим — запись оставалась в памяти
+                    // до перезапуска. Срок тот же час, что у готовой задачи:
+                    // он заведомо переживает чужой рендер, а переадресация
+                    // нужна ровно пока клиент опрашивает и качает.
+                    setTimeout(() => {
+                        if (tasks.has(taskId)) cleanupTask(taskId);
+                    }, 3600000);
                     return true;
                 } catch (err) {
                     console.warn(`[Миграция] Не вышло отдать ${taskId}: ${err.message}`);
