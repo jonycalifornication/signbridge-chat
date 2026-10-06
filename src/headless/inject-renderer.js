@@ -477,7 +477,11 @@
         let tornWorstDiff = 0;
         let thumbNoiseSum = 0;
         let thumbNoiseCount = 0;
-        let pixelGuardOff = thumbCtx === null;
+        /** Проверка идёт только по явному флагу — см. resolveFrameAudit()
+         *  в src/server/index.js: обратное чтение кадра стоит пятикратной
+         *  скорости записи, и постоянно держать его нельзя. */
+        const frameAudit = !!(renderProfile && renderProfile.frameAudit);
+        let pixelGuardOff = thumbCtx === null || !frameAudit;
         /** Та же страховка, что у сторожа отрисовок: если «не совпало» на
          *  каждом четвёртом кадре, это наша неверная догадка, а не сбой, и
          *  удваивать работу на всю лекцию нельзя. */
@@ -869,7 +873,8 @@
                 (guardOff ? ' — сторож был выключен по ходу записи' : '')
             );
             const noise = thumbNoiseCount ? thumbNoiseSum / thumbNoiseCount : 0;
-            console.log(
+            if (!frameAudit) console.log('[Headless] Снимок против холста: не проверялось (FRAME_AUDIT выключен)');
+            else console.log(
                 `[Headless] Снимок против холста: не совпало ${tornSuspects} из ${thumbNoiseCount}` +
                 ` (${thumbNoiseCount ? (tornSuspects * 100 / thumbNoiseCount).toFixed(3) : '0'}%), ` +
                 `пересняли ${tornConfirmed}, худшее расхождение ${tornWorstDiff.toFixed(1)}, фоновое ${noise.toFixed(2)}` +
