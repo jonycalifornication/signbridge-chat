@@ -59,6 +59,10 @@ services:
       # The mirrored avatar build survives container rebuilds.
       - ./avatar_mirror:/app/avatar_mirror
     restart: always
+    # Chrome оставляет после себя процессы (crashpad, упавший GPU-процесс), и
+    # их родителем становится PID 1. Без init им был node, а он их не
+    # подбирает: ~5 зомби на рендер, к 21.10.2026 накопилось 257. tini — да.
+    init: true
 
   # ── Воркеры рендера на остальных картах ──────────────────────────────────
   #
@@ -94,6 +98,7 @@ services:
       - ./data:/app/data
       - ./avatar_mirror_w1:/app/avatar_mirror
     restart: always
+    init: true # зомби Chrome — см. avatar-renderer
 
   avatar-renderer-2:
     build:
@@ -117,6 +122,7 @@ services:
       - ./data:/app/data
       - ./avatar_mirror_w2:/app/avatar_mirror
     restart: always
+    init: true # зомби Chrome — см. avatar-renderer
 
   avatar-renderer-3:
     build:
@@ -140,3 +146,4 @@ services:
       - ./data:/app/data
       - ./avatar_mirror_w3:/app/avatar_mirror
     restart: always
+    init: true # зомби Chrome — см. avatar-renderer
