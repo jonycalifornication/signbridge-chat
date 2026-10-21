@@ -1,6 +1,7 @@
 import './load-env.js'; // must stay first: modules below read config at import time
 
 import { tasksInFlight as countTasksInFlight } from './task-slots.js';
+import { gpuUnavailableMessage, probeGpuAccess } from './gpu-access.js';
 
 import express from 'express';
 import cors from 'cors';
@@ -326,11 +327,8 @@ function hasRendererGPU() {
     // NVIDIA_VISIBLE_DEVICES, видит устройство /dev/nvidia1 — и прежняя
     // проверка молча уводила его на программный рендер. Замер: тот же ролик
     // 184 с вместо 40, и таймаут считался по «процессорной» формуле.
-    try {
-        return fs.readdirSync('/dev').some((name) => /^nvidia\d+$/.test(name));
-    } catch {
-        return false;
-    }
+    // «Положена», а не «доступна»: доступ проверяет generateVideoCore.
+    return probeGpuAccess().expected;
 }
 
 /**
@@ -586,7 +584,14 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
             );
         }
 
-        const hasGPU = hasRendererGPU();
+        // Карта положена, но не открывается — рендер обречён: Chrome без
+        // программного растеризатора не создаст WebGL, и виджет 30 с будет
+        // ждать то, чего не случится. Падаем сразу и называем, что чинить.
+        const gpu = probeGpuAccess();
+        if (gpu.expected && !gpu.accessible) {
+            throw new Error(gpuUnavailableMessage(gpu.reason));
+        }
+        const hasGPU = gpu.expected;
         console.log(`[Server] GPU mode: ${hasGPU ? 'NVIDIA (EGL)' : 'ANGLE SwiftShader (CPU)'}`);
         const encoderMaxQueueSize = resolveEncoderMaxQueueSize(hasGPU);
         console.log(`[Server] Encoder queue limit: ${encoderMaxQueueSize}`);
@@ -845,6 +850,10 @@ function tasksInFlight() {
 
 /** Свободны ли мы прямо сейчас — для себя и для соседей. */
 function workerIsFree() {
+    // Воркер, у которого отобрали карту, работу брать не должен — он её только
+    // уронит. Тогда входящая задача уйдёт соседу, а соседи не отдадут ему свою.
+    const gpu = probeGpuAccess();
+    if (gpu.expected && !gpu.accessible) return false;
     return renderSemaphore.free && tasksInFlight() < renderSemaphore.max;
 }
 
@@ -912,6 +921,7 @@ async function pipeFromOwner(req, res, url) {
  * nginx наружу /internal не отдаёт.
  */
 app.get('/internal/slots', async (_req, res) => {
+    const access = probeGpuAccess();
     res.json({
         worker: WORKER_ID || null,
         free: workerIsFree(),
@@ -920,6 +930,10 @@ app.get('/internal/slots', async (_req, res) => {
         queued: renderSemaphore.waiting.length,
         // Занятость карты: по ней сосед решает, стоит ли отдавать работу.
         gpu: await gpuLoad(),
+        // false — карта положена, но не открывается (см. gpu-access.js);
+        // null — карты нет вовсе, рендер на CPU.
+        gpuAccessible: access.expected ? access.accessible : null,
+        gpuError: access.reason,
     });
 });
 
