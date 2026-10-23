@@ -408,6 +408,19 @@
         const originalPostToParent = subtitles ? widget.postToParent : null;
 
         let virtualTime = 0;
+        // Микшер виджета и его родной update: подменяем на время записи и
+        // возвращаем в finally — поэтому объявлены вне try.
+        let mixerTimeMs = 0;
+        let wrappedMixer = null;
+        let originalMixerUpdate = null;
+        /** Идёт проигрывание: виджет всегда чего-то ждёт — таймера или конца
+         *  клипа. Если ждать нечего, он занят асинхронной работой (подгрузка
+         *  букв дактиля, разбор анимации), и часы стоят. См. advanceTo. */
+        let inPlayback = false;
+        let busyHolds = 0;
+        /** Подписчиков на 'finished', что висят у микшера ещё до проигрывания:
+         *  они постоянные и ни о каком клипе не говорят. */
+        let baseFinishedListeners = 0;
         const pendingTimeouts = [];
         let rafIdx = 0;
         let isEncoding = true;
@@ -547,6 +560,186 @@
 
             performance.now = () => virtualTime;
             Date.now = () => virtualTime;
+
+            /*
+             * ТОЧНОЕ ВРЕМЯ СОБЫТИЙ ВНУТРИ КАДРА.
+             *
+             * Раньше часы шли только шагами кадра (33.3 мс). Таймер срабатывал
+             * на первом кадре ПОСЛЕ своего срока, конец клипа микшер замечал
+             * тоже на кадре, а следующее ожидание отсчитывалось уже от этого
+             * кадра — то есть каждое ожидание теряло в среднем полкадра, и
+             * потери копились. Замер на лекции (10 кусков, 8764 ожидания):
+             * +150 с к времени, которое считает логика виджета, ровно по
+             * 17 мс на ожидание. На ×4 это +4.5% к длине, на ×1 почти ноль —
+             * планировщик s2a не мог это учесть ни одной константой.
+             *
+             * Теперь между кадрами часы идут от события к событию: ближайший
+             * таймер или конец клипа LoopOnce. Микшер доводится ровно до этого
+             * момента, событие срабатывает с часами на нём, и вся цепочка
+             * await после него (следующий жест, его зазор, губы) доигрывается
+             * до того, как часы двинутся дальше. Кадры по-прежнему пишутся
+             * ровно раз в 33.3 мс — меняется только КОГДА внутри кадра
+             * начинается следующее.
+             */
+            const LOOP_ONCE = 2200; // THREE.LoopOnce
+            /** Защита от цикла setTimeout(0): больше событий на кадр не бывает. */
+            const MAX_EVENTS_PER_FRAME = 5000;
+            /** Шаг сверх расчёта, чтобы клип точно дошёл до конца, а не до
+             *  duration − 1e-15 из-за округления. 1 нс на событие. */
+            const FINISH_EPSILON_S = 1e-9;
+            mixerTimeMs = virtualTime;
+
+            /** Кадровый update микшера дотягивает его только до кадра: часть
+             *  времени он уже прошёл подшагами между событиями. Губы, моргание
+             *  и пружины VRM получают полный шаг кадра — им подшаги не нужны. */
+            const wrapMixer = () => {
+                const mixer = widget.mixer;
+                if (!mixer || mixer === wrappedMixer) return;
+                if (wrappedMixer && originalMixerUpdate) wrappedMixer.update = originalMixerUpdate;
+                wrappedMixer = mixer;
+                originalMixerUpdate = mixer.update;
+                mixerTimeMs = virtualTime;
+                mixer.update = function (deltaSeconds) {
+                    if (!deltaSeconds) return originalMixerUpdate.call(mixer, 0);
+                    const remaining = Math.max(0, virtualTime - mixerTimeMs) / 1000;
+                    mixerTimeMs = virtualTime;
+                    return originalMixerUpdate.call(mixer, remaining);
+                };
+            };
+            wrapMixer();
+
+            /** Когда (в мс виртуального времени) ближайший клип LoopOnce дойдёт
+             *  до конца. Infinity — таких нет. */
+            const nextClipEnd = () => {
+                const mixer = wrappedMixer;
+                if (!mixer || !Array.isArray(mixer._actions)) return Infinity;
+                let best = Infinity;
+                const active = mixer._nActiveActions || 0;
+                for (let i = 0; i < active; i++) {
+                    const action = mixer._actions[i];
+                    if (!action || !action.enabled || action.paused) continue;
+                    if (action.loop !== LOOP_ONCE || action._startTime !== null) continue;
+                    if (action._timeScaleInterpolant) continue; // warp — время нелинейно, ловим кадром
+                    const scale = action._effectiveTimeScale;
+                    if (!(scale > 0)) continue;
+                    const clip = action.getClip ? action.getClip() : action._clip;
+                    const left = (clip.duration - action.time) / scale;
+                    if (!(left >= 0)) continue;
+                    best = Math.min(best, mixerTimeMs + left * 1000);
+                }
+                return best;
+            };
+
+            const stepMixerTo = (atMs) => {
+                if (!wrappedMixer || !originalMixerUpdate) return;
+                const dt = (atMs - mixerTimeMs) / 1000;
+                if (dt <= 0) return;
+                mixerTimeMs = atMs;
+                originalMixerUpdate.call(wrappedMixer, dt + FINISH_EPSILON_S);
+            };
+
+            // Граница задачи — дождаться, пока доиграют все промисы, заведённые
+            // событием. MessageChannel, а не setTimeout(0): тот подменён нами же,
+            // а настоящий после пяти вложений спит по 4 мс.
+            const channel = new MessageChannel();
+            const channelQueue = [];
+            channel.port1.onmessage = () => { const next = channelQueue.shift(); if (next) next(); };
+            const macrotask = () => new Promise((resolve) => {
+                channelQueue.push(resolve);
+                channel.port2.postMessage(0);
+            });
+            const settle = async () => { await macrotask(); await macrotask(); };
+
+            /** Ближайшее событие в мс виртуального времени: таймер или конец
+             *  клипа LoopOnce. Infinity — событий нет. */
+            const nextEventAt = () => {
+                let nextTimer = Infinity;
+                for (const t of pendingTimeouts) if (t.fireAt < nextTimer) nextTimer = t.fireAt;
+                return Math.min(nextTimer, nextClipEnd());
+            };
+
+            /** Дольше одной занятости часы не держим: зависнуть хуже, чем
+             *  потерять кадр. */
+            const BUSY_HOLD_LIMIT_MS = 3000;
+            /**
+             * Ждёт ли виджет сейчас чего-то из проигрывания: своего ожидания
+             * (зазор, губы, пауза речи — всё через playback.sleep) или конца
+             * клипа (подписчик на 'finished' у микшера). Спрашиваем ИМЕННО его, а
+             * не «есть ли вообще таймеры»: посторонний таймер страницы держал
+             * часы идущими, пока виджет качал буквы, — минус 20 мс на слово.
+             */
+            const widgetWaiting = () => {
+                const waits = widget.playback && widget.playback._waits;
+                if (waits && waits.size > 0) return true;
+                // Считаем только подписчиков сверх постоянных: у микшера их висит
+                // два ещё до первого жеста, и «есть подписчик» значило бы «ждёт
+                // клип» всегда — первый жест стартовал кадром позже (+33.3 мс).
+                const listeners = wrappedMixer && wrappedMixer._listeners && wrappedMixer._listeners.finished;
+                if (listeners && listeners.length > baseFinishedListeners) return true;
+                // Старый виджет без реестра ожиданий — прежняя, грубая мерка.
+                if (!waits) return nextEventAt() !== Infinity;
+                return false;
+            };
+            /**
+             * Виджет посреди проигрывания, но не ждёт ни своего таймера, ни
+             * клипа: значит, он занят — качает буквы дактиля, читает тело
+             * ответа, разбирает анимацию, грузит модуль. Часы в это время
+             * стоят. Без этого на каждом дактилированном слове они убегали на
+             * две трети кадра (замер: 19–21 мс на слово), а запрос, начатый
+             * посреди проигрывания, сетевое удержание в начале витка ловило уже
+             * ПОСЛЕ того, как кадр прошёл (ровно +33.3 мс на последовательность).
+             * Ждём, пока появится, чего ждать.
+             */
+            const holdWhileBusy = async () => {
+                if (!inPlayback) return;
+                const started = originalPerfNow.call(performance);
+                const limit = Math.max(BUSY_HOLD_LIMIT_MS, MAX_NETWORK_HOLD_MS);
+                let held = false;
+                while (
+                    inPlayback &&
+                    !widgetWaiting() &&
+                    originalPerfNow.call(performance) - started < limit
+                ) {
+                    held = true;
+                    // В полёте запрос — спим по-настоящему, а не крутим цикл.
+                    if (pendingNetwork > 0) await realSleep(2);
+                    else await macrotask();
+                }
+                if (held) busyHolds++;
+            };
+
+            /**
+             * Довести часы до frameTime, отработав по пути все события в их
+             * собственный момент. Возвращает обновлённый счётчик удержаний сети.
+             */
+            const advanceTo = async (frameTime, heldTotal) => {
+                for (let events = 0; events < MAX_EVENTS_PER_FRAME; events++) {
+                    await holdWhileBusy();
+                    const at = Math.max(virtualTime, nextEventAt());
+                    if (!(at <= frameTime)) break;
+
+                    stepMixerTo(at);
+                    virtualTime = at;
+                    const ripe = [];
+                    for (let i = pendingTimeouts.length - 1; i >= 0; i--) {
+                        if (pendingTimeouts[i].fireAt <= at) ripe.push(pendingTimeouts.splice(i, 1)[0]);
+                    }
+                    ripe.sort((a, b) => a.fireAt - b.fireAt || a.id - b.id);
+                    ripe.forEach((t) => t.cb());
+                    await settle();
+
+                    // Событие могло начать загрузку (буквы дактиля) — время
+                    // стоит, пока она идёт, как и на границе кадра.
+                    let held = 0;
+                    while (pendingNetwork > 0 && held < MAX_NETWORK_HOLD_MS && heldTotal < MAX_TOTAL_NETWORK_HOLD_MS) {
+                        await realSleep(16);
+                        held += 16;
+                        heldTotal += 16;
+                    }
+                    if (held > 0) await settle();
+                }
+                return heldTotal;
+            };
             if (widget.clock) {
                 widget.clock.getDelta = () => TICK_MS / 1000;
             }
@@ -605,6 +798,12 @@
             }
 
             // Background deterministic loop
+            //
+            // Кадр k — состояние сцены РОВНО в k·TICK от начала записи, и в
+            // файле он стоит на k·TICK. Раньше первый виток сначала сдвигал
+            // часы, и кадр k показывал момент (k+1)·TICK: весь аватар шёл на
+            // кадр раньше речи. Поэтому первый виток часы не двигает.
+            let firstTick = true;
             const encodingPromise = (async () => {
                 while (isEncoding || pendingTimeouts.length > 0) {
                     // Freeze virtual time (and therefore the video) while a
@@ -625,16 +824,14 @@
                         await waitForEncoderBackpressure(videoEncoder, maxEncoderQueueSize);
                     }
 
-                    virtualTime += TICK_MS;
-
-                    const ripe = [];
-                    for (let i = pendingTimeouts.length - 1; i >= 0; i--) {
-                        if (virtualTime >= pendingTimeouts[i].fireAt) {
-                            ripe.push(pendingTimeouts.splice(i, 1)[0]);
-                        }
-                    }
-                    ripe.sort((a, b) => a.fireAt - b.fireAt);
-                    ripe.forEach((t) => t.cb());
+                    // События внутри кадра — в ИХ момент, а не на границе кадра.
+                    // См. advanceTo: без этого каждое ожидание теряло в среднем
+                    // полкадра, и на лекции это набегало в минуты.
+                    const frameTime = firstTick ? virtualTime : virtualTime + TICK_MS;
+                    firstTick = false;
+                    totalHeldMs = await advanceTo(frameTime, totalHeldMs);
+                    virtualTime = frameTime;
+                    wrapMixer();
 
                     if (rafCb) {
                         const cb = rafCb;
@@ -749,7 +946,13 @@
                         if (subtitles) {
                             try { source = subtitles.compose(bitmap); } catch (e) { source = bitmap; }
                         }
-                        const frame = new VideoFrame(source, { timestamp: (frameCount * 1_000_000) / FRAMERATE });
+                        // Длительность кадра обязательна: без неё mp4-muxer
+                        // ставит последнему кадру ноль, и файл выходит на кадр
+                        // короче записанного (замер: 7103 кадра при 7104).
+                        const frame = new VideoFrame(source, {
+                            timestamp: (frameCount * 1_000_000) / FRAMERATE,
+                            duration: 1_000_000 / FRAMERATE,
+                        });
                         videoEncoder.encode(frame, { keyFrame: frameCount % 30 === 0 });
                         frame.close();
                         bitmap.close();
@@ -827,7 +1030,22 @@
             }
 
             if (response) {
-                await widget.playTranslateResponse(response, preloadedUrls, languageId, speeds, tokens, { pauses });
+                wrapMixer();
+                {
+                    const listeners = wrappedMixer && wrappedMixer._listeners && wrappedMixer._listeners.finished;
+                    baseFinishedListeners = listeners ? listeners.length : 0;
+                }
+                inPlayback = true;
+                const playbackStartedAt = virtualTime;
+                try {
+                    await widget.playTranslateResponse(response, preloadedUrls, languageId, speeds, tokens, { pauses });
+                } finally {
+                    inPlayback = false;
+                }
+                // Точная длина последовательности, без округления до кадра:
+                // по ней сверяют модель времени s2a (длина файла кратна 33 мс).
+                console.log(`[Headless] Последовательность: ${((virtualTime - playbackStartedAt) / 1000).toFixed(4)} с`);
+                if (busyHolds > 0) console.log(`[Headless] Часы придержаны на асинхронной работе виджета: ${busyHolds} раз`);
             } else {
                 console.warn('[Headless] Nothing to play from the API — speaking the raw text.');
                 await widget.processTextSelection(text);
@@ -846,7 +1064,12 @@
             // забирал их целиком независимо от того, сколько тишины в записи
             // после него на самом деле. Значение по умолчанию прежнее, так что
             // клиенты без tail_seconds получают тот же файл.
-            const tailMs = Number.isFinite(Number(config.tailSeconds))
+            //
+            // Кадров в файле — ceil((lead + последовательность + хвост) / кадр):
+            // кадр k показывает момент k·кадр, и пишутся все кадры раньше конца
+            // хвоста. На этом правиле s2a ставит стыки склейки на сетку кадров
+            // (`alignToFrames` в frontend/lib/video-chunks.ts) — менять вместе.
+            const tailMs =Number.isFinite(Number(config.tailSeconds))
                 ? Math.max(0, Number(config.tailSeconds) * 1000)
                 : 2000;
             pendingTimeouts.push({
@@ -868,6 +1091,7 @@
             if (originalPostToParent) widget.postToParent = originalPostToParent;
             window.setTimeout = originalSetTimeout;
             window.clearTimeout = originalClearTimeout;
+            if (wrappedMixer && originalMixerUpdate) wrappedMixer.update = originalMixerUpdate;
             window.requestAnimationFrame = originalRAF;
             window.fetch = originalFetch;
             Date.now = originalDateNow;
