@@ -1,3 +1,15 @@
+# Узлы /dev/nvidia* перечислены в `devices:` явно, хотя `runtime: nvidia` и
+# так их выдаёт. Хук NVIDIA добавляет их в обход systemd, и после любого
+# `systemctl daemon-reload` на хосте systemd заново применяет к контейнеру
+# свой список устройств — без них. Узлы остаются, а открыть их нельзя:
+# nvidia-smi пишет «Failed to initialize NVML: Unknown Error», рендер падает
+# на проверке доступа (src/server/gpu-access.js). На sb2 daemon-reload делает
+# еженедельное автообновление tailscale: так рендеры легли 28.10.2026.
+#
+# То, что перечислено здесь, Docker передаёт systemd, и сброс это переживает.
+# Проверка: `systemctl show docker-<id>.scope -p DeviceAllow` должен содержать
+# /dev/char/195:* и 511:*. /dev/dri в этом списке уже есть — его хук кладёт
+# в спецификацию сам.
 services:
   avatar-renderer:
     runtime: nvidia
@@ -7,6 +19,16 @@ services:
       __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/10_nvidia.json
     volumes:
       - ./docker/nvidia-egl/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/10_nvidia.json:ro
+    # Все карты, как в NVIDIA_VISIBLE_DEVICES по умолчанию.
+    devices:
+      - /dev/nvidiactl:/dev/nvidiactl
+      - /dev/nvidia-modeset:/dev/nvidia-modeset
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
+      - /dev/nvidia0:/dev/nvidia0
+      - /dev/nvidia1:/dev/nvidia1
+      - /dev/nvidia2:/dev/nvidia2
+      - /dev/nvidia3:/dev/nvidia3
 
   avatar-renderer-1:
     runtime: nvidia
@@ -18,6 +40,12 @@ services:
       __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/10_nvidia.json
     volumes:
       - ./docker/nvidia-egl/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/10_nvidia.json:ro
+    devices:
+      - /dev/nvidiactl:/dev/nvidiactl
+      - /dev/nvidia-modeset:/dev/nvidia-modeset
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
+      - /dev/nvidia1:/dev/nvidia1
 
   avatar-renderer-2:
     runtime: nvidia
@@ -29,6 +57,12 @@ services:
       __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/10_nvidia.json
     volumes:
       - ./docker/nvidia-egl/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/10_nvidia.json:ro
+    devices:
+      - /dev/nvidiactl:/dev/nvidiactl
+      - /dev/nvidia-modeset:/dev/nvidia-modeset
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
+      - /dev/nvidia2:/dev/nvidia2
 
   avatar-renderer-3:
     runtime: nvidia
@@ -40,3 +74,9 @@ services:
       __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/10_nvidia.json
     volumes:
       - ./docker/nvidia-egl/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/10_nvidia.json:ro
+    devices:
+      - /dev/nvidiactl:/dev/nvidiactl
+      - /dev/nvidia-modeset:/dev/nvidia-modeset
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
+      - /dev/nvidia3:/dev/nvidia3
