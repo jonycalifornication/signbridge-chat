@@ -2,6 +2,7 @@ import './load-env.js'; // must stay first: modules below read config at import 
 
 import { tasksInFlight as countTasksInFlight } from './task-slots.js';
 import { gpuUnavailableMessage, probeGpuAccess } from './gpu-access.js';
+import { cacheLanguageId, parseLanguageId, renderLanguageId } from './sign-language.js';
 
 import express from 'express';
 import cors from 'cors';
@@ -272,6 +273,8 @@ function normalizePlaybackHints(body) {
         tailSeconds,
         subtitles,
         alreadyGlossed: body?.already_glossed === true,
+        // Язык жестов (KSL/RSL). null — у сервиса свой по умолчанию.
+        languageId: parseLanguageId(body?.language_id),
     };
 }
 
@@ -289,6 +292,9 @@ function getCacheKey(config) {
         background: config.background || 'white',
         mode: config.mode || 'normal',
         alreadyGlossed: config.alreadyGlossed === true,
+        // Те же глоссы на другом языке — другие жесты. Язык по умолчанию
+        // пропускается (undefined), и прежние ключи не меняются.
+        languageId: cacheLanguageId(config.languageId),
         tokens: config.tokens?.length ? config.tokens.map(t => t.word) : null,
         speeds: config.speeds?.length ? config.speeds : null,
         // Те же глоссы с другими паузами — другое видео, и отдать прежний файл
@@ -311,13 +317,13 @@ function getCacheKey(config) {
  * video that legitimately belongs on the avatar gateway: it validates our key,
  * meters usage and performs text→gloss on its side.
  */
-function resolveRenderPlanApiConfig() {
+function resolveRenderPlanApiConfig(languageId = null) {
     const rawApiUrl = process.env.RENDER_PLAN_API_URL || `${AVATAR_URL}/api/v1`;
 
     return {
         apiUrl: rawApiUrl.replace(/\/+$/, ''),
         apiKey: AVATAR_API_KEY,
-        languageId: process.env.RENDER_PLAN_LANGUAGE_ID || 'KSL',
+        languageId: renderLanguageId(languageId),
         fetchTimeoutMs: Number(process.env.RENDER_PLAN_FETCH_TIMEOUT_MS) || 10000,
     };
 }
@@ -374,14 +380,14 @@ function resolveFrameAudit() {
     return raw === '1' || raw.toLowerCase() === 'true';
 }
 
-async function prepareRenderPlan(glosses, hasGPU, onProgress = null, mode = 'normal', alreadyGlossed = false) {
+async function prepareRenderPlan(glosses, hasGPU, onProgress = null, mode = 'normal', alreadyGlossed = false, languageId = null) {
     const renderText = Array.isArray(glosses) ? glosses.join(' ') : String(glosses || '');
     let renderPlan = null;
     let renderTimeoutMs = estimateFallbackTimeoutMs(renderText, { hasGPU });
 
     try {
         if (onProgress) onProgress(8, 'Строим план жестов...');
-        const planOptions = { ...resolveRenderPlanApiConfig(), mode, alreadyGlossed };
+        const planOptions = { ...resolveRenderPlanApiConfig(languageId), mode, alreadyGlossed };
         renderPlan = await buildRenderPlan(renderText, planOptions);
         renderTimeoutMs = estimateRenderTimeoutMs(renderPlan, { hasGPU });
         console.log(`[Server] Render plan ready: ${JSON.stringify(renderPlan.stats)}, timeout=${Math.round(renderTimeoutMs / 1000)}s`);
@@ -602,7 +608,7 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
                     ? planning.renderTimeoutMs
                     : estimateRenderTimeoutMs(planning.renderPlan, { hasGPU })
             }
-            : await prepareRenderPlan(glosses, hasGPU, onProgress, planning.mode || 'normal', planning.alreadyGlossed === true);
+            : await prepareRenderPlan(glosses, hasGPU, onProgress, planning.mode || 'normal', planning.alreadyGlossed === true, planning.languageId || null);
         const { renderPlan, renderTimeoutMs } = preparedPlan;
 
         browser = await puppeteer.launch({
@@ -662,7 +668,9 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
         const rendererUrl = `${mirrorEntryUrl(SELF_URL, mirrorVariant)}?${new URLSearchParams({
             apiUrl: AVATAR_PAGE_API_URL,
             apiKey: AVATAR_API_KEY,
-            languageId: process.env.RENDER_PLAN_LANGUAGE_ID || 'KSL',
+            // Язык страницы — запасной путь: при готовом плане рендер берёт язык
+            // из плана, а без плана (шлюз не ответил) страница разбирает сама.
+            languageId: renderLanguageId(planning.languageId),
             // Просим аватар включить preserveDrawingBuffer: мы снимаем каждый
             // кадр с холста уже после отрисовки, а без флага содержимое буфера
             // в этот момент не определено — в видео пропадали целые меши
@@ -816,7 +824,7 @@ app.post('/api/v1/video/preview', rateLimit, apiKeyAuth, async (req, res) => {
     }
 
     try {
-        const planOptions = { ...resolveRenderPlanApiConfig(), mode: mode || 'normal', alreadyGlossed: hints.alreadyGlossed };
+        const planOptions = { ...resolveRenderPlanApiConfig(hints.languageId), mode: mode || 'normal', alreadyGlossed: hints.alreadyGlossed };
         const renderPlan = await buildRenderPlan(glosses, planOptions);
         const renderPreview = renderPlanToGlossPreview(renderPlan);
 
@@ -1106,7 +1114,7 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
     let renderPlan;
     let renderTimeoutMs;
     try {
-        ({ renderPlan, renderTimeoutMs } = await prepareRenderPlan(glosses, hasGPU, null, mode, hints.alreadyGlossed));
+        ({ renderPlan, renderTimeoutMs } = await prepareRenderPlan(glosses, hasGPU, null, mode, hints.alreadyGlossed, hints.languageId));
     } catch (err) {
         // План не построился — место освобождаем, иначе воркер будет считать
         // себя занятым до перезапуска.
