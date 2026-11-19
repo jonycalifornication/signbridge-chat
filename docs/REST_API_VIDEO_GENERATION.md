@@ -3,7 +3,8 @@
 Отправляешь текст — получаешь `.webm` с 3D-аватаром, который его показывает.
 Виджет подключать не нужно.
 
-**База:** `http://5.63.119.72:5173`
+**База:** `https://generator.signbridge.kz` — только с ключом в заголовке
+`X-API-Key` (см. «Авторизация»).
 
 ---
 
@@ -12,7 +13,8 @@
 Синхронный запрос: одно обращение, в ответ сразу файл.
 
 ```bash
-curl -X POST http://5.63.119.72:5173/api/v1/video/generate \
+curl -X POST https://generator.signbridge.kz/api/v1/video/generate \
+  -H 'X-API-Key: <ключ>' \
   -H 'Content-Type: application/json' \
   -d '{"glosses":"сәлем достар","background":"green"}' \
   -o video.webm
@@ -115,27 +117,42 @@ Server-Sent Events. Форма события зависит от момента
 ### Пример целиком
 
 ```javascript
-const base = 'http://5.63.119.72:5173';
+// Node 18+. EventSource из браузера не годится: ему не передать X-API-Key.
+const base = 'https://generator.signbridge.kz';
+const headers = { 'X-API-Key': process.env.GENERATOR_API_KEY };
 
 const { taskId, glossPreview } = await fetch(`${base}/api/v1/video/generate-async`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({ glosses: 'сәлем достар', background: 'green' }),
 }).then(r => r.json());
 
 console.log('Глоссы:', glossPreview);
 
-const videoUrl = await new Promise((resolve, reject) => {
-    const es = new EventSource(`${base}/api/v1/video/status/${taskId}`);
-    es.onmessage = (e) => {
-        const s = JSON.parse(e.data);
-        if (s.error) { es.close(); reject(new Error(s.error)); return; }
-        if (s.downloadUrl) { es.close(); resolve(base + s.downloadUrl); }
-    };
-    es.onerror = () => { es.close(); reject(new Error('Соединение разорвано')); };
-});
+// Статус — поток SSE, но первым событием он сразу шлёт текущее состояние:
+// читаем его, закрываем соединение и спрашиваем снова через пару секунд.
+async function status() {
+    const resp = await fetch(`${base}/api/v1/video/status/${taskId}`, { headers });
+    const reader = resp.body.pipeThrough(new TextDecoderStream()).getReader();
+    let text = '';
+    for (;;) {
+        const { value, done } = await reader.read();
+        if (done) throw new Error('Поток закрылся без состояния');
+        text += value;
+        const line = text.split('\n').find(l => l.startsWith('data:'));
+        if (line) { reader.cancel(); return JSON.parse(line.slice(5)); }
+    }
+}
 
-console.log('Готово:', videoUrl);
+for (;;) {
+    const s = await status();
+    if (s.error) throw new Error(s.error);
+    if (s.status === 'completed') break;
+    await new Promise(r => setTimeout(r, 2000));
+}
+
+const video = await fetch(`${base}/api/v1/video/download/${taskId}`, { headers });
+console.log('Готово:', video.headers.get('content-type'));
 ```
 
 ---
@@ -184,7 +201,8 @@ console.log('Готово:', videoUrl);
 ### Целиком одним запросом
 
 ```bash
-curl -X POST http://5.63.119.72:5173/api/v1/video/generate \
+curl -X POST https://generator.signbridge.kz/api/v1/video/generate \
+  -H 'X-API-Key: <ключ>' \
   -H 'Content-Type: application/json' \
   -d '{"glosses":"АДАМ БАРУ","already_glossed":true,"tokens":[{"gloss":"АДАМ","word":"адам"},{"gloss":"БАРУ","word":"барады"}],"speeds":[1.0,1.5],"background":"green"}' \
   -o video.webm
@@ -207,8 +225,9 @@ curl -X POST http://5.63.119.72:5173/api/v1/video/generate \
 
 | | |
 |---|---|
-| Запросов с одного IP | 10 в минуту, дальше `429` |
-| Одновременных рендеров | 2, остальные ждут в очереди |
+| Запросов с ключом | без ограничения частоты |
+| Попыток без ключа с одного IP | 10 в минуту (`401`), дальше `429` |
+| Одновременных рендеров | по одному на видеокарту (4), остальные ждут в очереди |
 | Задач в памяти | 500 |
 | Кэш видео | 100 МБ, вытесняется по давности |
 
@@ -219,21 +238,19 @@ curl -X POST http://5.63.119.72:5173/api/v1/video/generate \
 
 ## Авторизация
 
-Сейчас её **нет**: эндпоинты открыты всем, кто знает адрес.
-
-В сервере есть система ключей (`X-API-Key` плюс привязка к домену через
-`Origin`/`Referer`), но проверка отключена заглушкой в `apiKeyAuth`. Если её
-включить, запрос будет выглядеть так:
+Весь `/api/v1/video/*`, включая готовые файлы кэша, — только с заголовком
+`X-API-Key`. Без него или с чужим ключом — `401`.
 
 ```bash
-curl -X POST http://5.63.119.72:5173/api/v1/video/generate \
-  -H 'X-API-Key: <ключ>' \
-  -H 'Content-Type: application/json' \
-  -d '{"glosses":"сәлем"}'
+curl https://generator.signbridge.kz/api/v1/video/status/<taskId> \
+  -H 'X-API-Key: <ключ>'
 ```
 
-Ключи выпускаются в админке `/admin/keys` — она доступна только с самого сервера,
-через SSH-туннель.
+Ключи задаются на сервере генератора переменной `GENERATOR_API_KEYS` (через
+запятую, чтобы сменить ключ без простоя). Сейчас клиент один — портал; его ключ
+лежит у него в `AVATAR_MP4_GENERATOR_API_KEY`. Привязки к домену через
+`Origin`/`Referer` больше нет: эти заголовки клиент вне браузера подставляет
+любые.
 
 ---
 
