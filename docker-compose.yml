@@ -1,19 +1,13 @@
 services:
-  # Static video-generator UI (nginx). Serves the site root and proxies the
-  # renderer's API. No avatar code is built into this image any more.
+  # Входной nginx: раздаёт /api/v1/video/* по воркерам рендера, остальное —
+  # 404. Страницы у генератора нет. Имя сервиса историческое (здесь когда-то
+  # жил UI); не переименовывать — сменится контейнер, а старый останется
+  # держать порт 5173, на который смотрит nginx на signbridge1.
   avatar-widget:
     build:
       context: .
     ports:
       - "5173:80"
-    environment:
-      # Internal URL for video renderer
-      - RENDERER_URL=http://avatar-renderer:3003
-
-    # ✅ Нужно для Linux-сервера, чтобы host.docker.internal резолвился
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
     restart: always
 
   # Video renderer: puppeteer + WebGL on this box's GPU. It also serves the
@@ -38,6 +32,10 @@ services:
       - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
       # Our client key for the avatar gateway (translate + CMS lookups).
       - AVATAR_API_KEY=${AVATAR_API_KEY:?set AVATAR_API_KEY in .env}
+      # Ключи, с которыми пускаем в API видео (X-API-Key), через запятую.
+      # Тот же, что шлёт портал. Пусто — compose не запустится: открытый по
+      # ошибке генератор хуже, чем не поднявшийся.
+      - GENERATOR_API_KEYS=${GENERATOR_API_KEYS:?set GENERATOR_API_KEYS in .env}
       # VRMA downloads go straight to storage, bypassing the product server.
       - AVATAR_FILES_URL=${AVATAR_FILES_URL:-http://94.131.83.85:8000}
       - RENDER_PLAN_LANGUAGE_ID=${RENDER_PLAN_LANGUAGE_ID:-KSL}
@@ -53,9 +51,6 @@ services:
     volumes:
       - ./video_cache:/app/video_cache
       - ./temp_videos:/app/temp_videos
-      # data/ хранит api_keys.json и sessions.json — только каталог,
-      # монтировать отдельные файлы нельзя (docker создаст каталог).
-      - ./data:/app/data
       # The mirrored avatar build survives container rebuilds.
       - ./avatar_mirror:/app/avatar_mirror
     restart: always
@@ -86,6 +81,7 @@ services:
       - WORKER_PEERS=http://avatar-renderer:3003,http://avatar-renderer-2:3003,http://avatar-renderer-3:3003
       - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
       - AVATAR_API_KEY=${AVATAR_API_KEY:?set AVATAR_API_KEY in .env}
+      - GENERATOR_API_KEYS=${GENERATOR_API_KEYS:?set GENERATOR_API_KEYS in .env}
       - AVATAR_FILES_URL=${AVATAR_FILES_URL:-http://94.131.83.85:8000}
       - RENDER_PLAN_LANGUAGE_ID=${RENDER_PLAN_LANGUAGE_ID:-KSL}
       - RENDER_WIDTH=${RENDER_WIDTH:-}
@@ -95,7 +91,6 @@ services:
     volumes:
       - ./video_cache:/app/video_cache
       - ./temp_videos:/app/temp_videos
-      - ./data:/app/data
       - ./avatar_mirror_w1:/app/avatar_mirror
     restart: always
     init: true # зомби Chrome — см. avatar-renderer
@@ -110,6 +105,7 @@ services:
       - WORKER_PEERS=http://avatar-renderer:3003,http://avatar-renderer-1:3003,http://avatar-renderer-3:3003
       - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
       - AVATAR_API_KEY=${AVATAR_API_KEY:?set AVATAR_API_KEY in .env}
+      - GENERATOR_API_KEYS=${GENERATOR_API_KEYS:?set GENERATOR_API_KEYS in .env}
       - AVATAR_FILES_URL=${AVATAR_FILES_URL:-http://94.131.83.85:8000}
       - RENDER_PLAN_LANGUAGE_ID=${RENDER_PLAN_LANGUAGE_ID:-KSL}
       - RENDER_WIDTH=${RENDER_WIDTH:-}
@@ -119,7 +115,6 @@ services:
     volumes:
       - ./video_cache:/app/video_cache
       - ./temp_videos:/app/temp_videos
-      - ./data:/app/data
       - ./avatar_mirror_w2:/app/avatar_mirror
     restart: always
     init: true # зомби Chrome — см. avatar-renderer
@@ -134,6 +129,7 @@ services:
       - WORKER_PEERS=http://avatar-renderer:3003,http://avatar-renderer-1:3003,http://avatar-renderer-2:3003
       - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
       - AVATAR_API_KEY=${AVATAR_API_KEY:?set AVATAR_API_KEY in .env}
+      - GENERATOR_API_KEYS=${GENERATOR_API_KEYS:?set GENERATOR_API_KEYS in .env}
       - AVATAR_FILES_URL=${AVATAR_FILES_URL:-http://94.131.83.85:8000}
       - RENDER_PLAN_LANGUAGE_ID=${RENDER_PLAN_LANGUAGE_ID:-KSL}
       - RENDER_WIDTH=${RENDER_WIDTH:-}
@@ -143,7 +139,6 @@ services:
     volumes:
       - ./video_cache:/app/video_cache
       - ./temp_videos:/app/temp_videos
-      - ./data:/app/data
       - ./avatar_mirror_w3:/app/avatar_mirror
     restart: always
     init: true # зомби Chrome — см. avatar-renderer

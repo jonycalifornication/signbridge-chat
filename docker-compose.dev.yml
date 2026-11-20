@@ -1,18 +1,8 @@
+# Разработка: один рендерер на :3003, без входного nginx. Страницы у
+# генератора нет — API дёргается напрямую:
+#   curl -H "X-API-Key: $GENERATOR_API_KEYS" -H 'content-type: application/json' \
+#        -d '{"glosses":"алақан"}' localhost:3003/api/v1/video/generate-async
 services:
-  avatar-widget:
-    build:
-      context: .
-      target: builder
-    ports:
-      - "5173:5173"
-    volumes:
-      - .:/app
-      - /app/node_modules
-    environment:
-      - RENDERER_URL=http://avatar-renderer:3003
-    command: >
-      sh -c "npm install && npm run dev -- --host"
-
   avatar-renderer:
     build:
       context: .
@@ -23,12 +13,12 @@ services:
     environment:
       - AVATAR_URL=${AVATAR_URL:-https://widget.signbridge.kz}
       - AVATAR_API_KEY=${AVATAR_API_KEY:?set AVATAR_API_KEY in .env}
+      - GENERATOR_API_KEYS=${GENERATOR_API_KEYS:?set GENERATOR_API_KEYS in .env}
       - AVATAR_FILES_URL=${AVATAR_FILES_URL:-http://host.docker.internal:8000}
       - RENDER_PLAN_LANGUAGE_ID=${RENDER_PLAN_LANGUAGE_ID:-KSL}
     volumes:
       - .:/app
       - /app/node_modules
-      - ./data:/app/data
       - ./avatar_mirror:/app/avatar_mirror
     extra_hosts:
       - "host.docker.internal:host-gateway"

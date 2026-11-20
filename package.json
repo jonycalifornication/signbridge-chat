@@ -4,9 +4,6 @@
   "description": "Sign language video generator. Renders on this GPU box; the avatar itself is mirrored from the signBridge-avatar project.",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
@@ -15,7 +12,6 @@
     "avatar:sync": "node scripts/sync-avatar.mjs"
   },
   "dependencies": {
-    "cors": "^2.8.5",
     "express": "^4.21.0",
     "mp4-muxer": "^5.2.2",
     "puppeteer": "^24.34.0",
@@ -25,7 +21,6 @@
     "@vitest/coverage-v8": "^4.0.15",
     "@vitest/ui": "^4.0.15",
     "happy-dom": "^20.0.11",
-    "vite": "^5.4.0",
     "vitest": "^4.0.15"
   }
 }

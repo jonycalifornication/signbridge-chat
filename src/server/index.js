@@ -5,7 +5,6 @@ import { gpuUnavailableMessage, probeGpuAccess } from './gpu-access.js';
 import { cacheLanguageId, parseLanguageId, renderLanguageId } from './sign-language.js';
 
 import express from 'express';
-import cors from 'cors';
 import puppeteer from 'puppeteer';
 import { exec, spawn } from 'child_process';
 import path from 'path';
@@ -21,7 +20,7 @@ import {
     renderPlanToGlossPreview
 } from '../headless/render-plan.js';
 import { resolveFrameSize, SUBTITLE_STRIP_HEIGHT } from '../headless/frame-size.js';
-import { validateRequest, getAllKeys, createKey, deleteKey } from './api-keys.js';
+import { createApiGuard, parseApiKeys } from './api-auth.js';
 import {
     AVATAR_URL,
     MIRROR_ROOT,
@@ -53,20 +52,27 @@ const SELF_URL = (process.env.SELF_URL || `http://localhost:${port}`).replace(/\
  */
 const AVATAR_PAGE_API_URL = `${SELF_URL}/avatar-api/v1`;
 
-app.use(cors());
+// Снаружи до нас два прокси: nginx на signbridge1 (generator.signbridge.kz) и
+// nginx этого проекта (:5173). Оба дописывают X-Forwarded-For. Без этой
+// настройки `req.ip` был адресом контейнера nginx, и лимит частоты выходил
+// общим на всех клиентов разом. Ровно 2, а не `true`: при `true` Express
+// поверил бы и тому, что клиент сам написал в заголовке.
+app.set('trust proxy', 2);
+
+// Весь API видео — только по ключу (см. api-auth.js). Включая готовые файлы
+// кэша ниже: имя файла там — md5 от глоссов и параметров, его можно вычислить,
+// зная текст. CORS больше не включаем: браузерного клиента у генератора нет,
+// его единственный клиент — бэкенд портала.
+const apiGuard = createApiGuard({ keys: parseApiKeys(process.env.GENERATOR_API_KEYS) });
+app.use('/api/v1/video', apiGuard.requireApiKey);
+
 app.use(express.json({ limit: '100kb' }));
 
 // Temporary directory for videos
 const TEMP_DIR = path.join(__dirname, '../../temp_videos');
 const CACHE_DIR = path.join(__dirname, '../../video_cache');
-// Inside data/, never mounted as a single file: docker creates a *directory*
-// when a bind-mount source is missing, and on a fresh server sessions.json is
-// git-ignored — so a file mount silently turns into a directory and every chat
-// is lost. The same trap already bit api_keys.json once.
-const DATA_DIR = path.join(__dirname, '../../data');
-const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 
-[TEMP_DIR, CACHE_DIR, DATA_DIR].forEach(dir => {
+[TEMP_DIR, CACHE_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -154,13 +160,6 @@ app.all('/avatar-api/v1/*', loopbackOnly, async (req, res) => {
         res.status(502).json({ error: 'Avatar upstream unavailable', detail: err.message });
     }
 });
-
-if (fs.existsSync(SESSIONS_FILE) && fs.statSync(SESSIONS_FILE).isDirectory()) {
-    console.error(`[Storage] ${SESSIONS_FILE} is a directory, not a file — chat history cannot be saved.`);
-    console.error('[Storage] Remove it (a stale docker bind-mount) and restart.');
-} else if (!fs.existsSync(SESSIONS_FILE)) {
-    fs.writeFileSync(SESSIONS_FILE, JSON.stringify([]));
-}
 
 const tasks = new Map();
 
@@ -492,46 +491,6 @@ class Semaphore {
 // двукратный.
 const renderSemaphore = new Semaphore(1);
 
-// --- Rate Limiter (per-IP) ---
-const rateLimitMap = new Map();
-const RATE_LIMIT_WINDOW = 60000;
-const RATE_LIMIT_MAX = 10;
-
-function rateLimit(req, res, next) {
-    const ip = req.ip || req.connection.remoteAddress;
-    const now = Date.now();
-    const entry = rateLimitMap.get(ip);
-    if (!entry || now - entry.start > RATE_LIMIT_WINDOW) {
-        rateLimitMap.set(ip, { start: now, count: 1 });
-        return next();
-    }
-    entry.count++;
-    if (entry.count > RATE_LIMIT_MAX) {
-        return res.status(429).json({ error: 'Too many requests. Try again later.' });
-    }
-    next();
-}
-
-setInterval(() => {
-    const now = Date.now();
-    for (const [ip, entry] of rateLimitMap) {
-        if (now - entry.start > RATE_LIMIT_WINDOW) rateLimitMap.delete(ip);
-    }
-}, RATE_LIMIT_WINDOW);
-
-/**
- * API Key Middleware
- */
-async function apiKeyAuth(req, res, next) {
-    return next(); // BYPASS
-
-    const isValid = await validateRequest(req);
-    if (!isValid) {
-        return res.status(401).json({ error: 'Unauthorized: Invalid or missing API Key/Domain' });
-    }
-    next();
-}
-
 const MUXER_LOCAL_PATH = path.join(__dirname, '../../node_modules/webm-muxer/build/webm-muxer.js');
 const MUXER_CDN_URL = 'https://cdn.jsdelivr.net/npm/webm-muxer@5.0.2/build/webm-muxer.js';
 // Второй мукс — mp4. Видео отдаём в нём: mp4 открывает что угодно, включая
@@ -763,7 +722,7 @@ async function generateVideoCore(glosses, avatar, background, userAgent, onProgr
 /**
  * v1: Synchronous Backend Endpoint (Retro-compatibility)
  */
-app.post('/api/v1/video/generate', rateLimit, apiKeyAuth, async (req, res) => {
+app.post('/api/v1/video/generate', async (req, res) => {
     const { glosses, avatar, background, mode } = req.body;
     const hints = normalizePlaybackHints(req.body);
 
@@ -815,7 +774,7 @@ app.post('/api/v1/video/generate', rateLimit, apiKeyAuth, async (req, res) => {
 /**
  * Preview gloss availability without launching the video renderer.
  */
-app.post('/api/v1/video/preview', rateLimit, apiKeyAuth, async (req, res) => {
+app.post('/api/v1/video/preview', async (req, res) => {
     const { glosses, mode } = req.body;
     const hints = normalizePlaybackHints(req.body);
 
@@ -905,7 +864,8 @@ async function ownerOf(taskId) {
  */
 async function pipeFromOwner(req, res, url) {
     const upstream = await fetch(url, {
-        headers: { accept: req.get('accept') || '*/*' },
+        // Сосед — тот же генератор и пускает только с ключом.
+        headers: { accept: req.get('accept') || '*/*', ...apiGuard.peerHeaders() },
         signal: AbortSignal.timeout(1200000),
     });
     res.status(upstream.status);
@@ -1025,8 +985,8 @@ async function findFreePeer(maxGpuLoad = null) {
     return eligible[Math.floor(Math.random() * eligible.length)].base;
 }
 
-app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res) => {
-    const { glosses, avatar, background, mode, sessionId, msgId } = req.body;
+app.post('/api/v1/video/generate-async', async (req, res) => {
+    const { glosses, avatar, background, mode } = req.body;
     const hints = normalizePlaybackHints(req.body);
 
     if (!glosses || (!Array.isArray(glosses) && typeof glosses !== 'string')) {
@@ -1050,7 +1010,11 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
             try {
                 const forwarded = await fetch(`${peer}/api/v1/video/generate-async`, {
                     method: 'POST',
-                    headers: { 'content-type': 'application/json', 'X-Render-Handoff': '1' },
+                    headers: {
+                        'content-type': 'application/json',
+                        'X-Render-Handoff': '1',
+                        ...apiGuard.peerHeaders(),
+                    },
                     body: JSON.stringify(req.body),
                     signal: AbortSignal.timeout(15000),
                 });
@@ -1068,16 +1032,6 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
 
     const taskId = WORKER_ID ? `${WORKER_ID}-${crypto.randomUUID()}` : crypto.randomUUID();
     const userAgent = req.headers['user-agent'] || '';
-
-    // De-duplication check: if this msgId is already being processed, just return that taskId
-    if (msgId) {
-        for (const [id, t] of tasks.entries()) {
-            if (t.msgId === msgId && t.status !== 'error') {
-                console.log(`[Server] Found existing task ${id} for message ${msgId}. Re-attaching.`);
-                return res.json({ taskId: id, status: 're-attached', ...(t.renderPreview || {}) });
-            }
-        }
-    }
 
     // Prune old completed/error tasks if over limit
     const MAX_TASKS = 500;
@@ -1106,8 +1060,6 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
         message: 'Готовим план рендера...',
         downloadUrl: null,
         sseResponse: null,
-        msgId,
-        sessionId,
     });
 
     const hasGPU = hasRendererGPU();
@@ -1153,8 +1105,6 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
         message: 'Задача создана...',
         downloadUrl: null,
         sseResponse: null,
-        msgId,
-        sessionId,
         renderPlan,
         renderTimeoutMs,
         renderPreview
@@ -1205,10 +1155,6 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
                     task.sseResponse.write(`data: ${JSON.stringify({ progress: 100, message: 'Готово (из кэша)!', downloadUrl: task.downloadUrl })}\n\n`);
                     task.sseResponse.end();
                 }
-                // Auto-update Project Persistence even on cache hit
-                if (sessionId && msgId) {
-                    updateSessionTaskResult(sessionId, msgId, task.downloadUrl);
-                }
                 return; // Early exit on cache hit
             }
 
@@ -1231,7 +1177,11 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
                 try {
                     const resp = await fetch(`${peer}/api/v1/video/generate-async`, {
                         method: 'POST',
-                        headers: { 'content-type': 'application/json', 'X-Render-Handoff': '1' },
+                        headers: {
+                            'content-type': 'application/json',
+                            'X-Render-Handoff': '1',
+                            ...apiGuard.peerHeaders(),
+                        },
                         body: JSON.stringify(task.requestBody || {}),
                         signal: AbortSignal.timeout(20000),
                     });
@@ -1323,11 +1273,6 @@ app.post('/api/v1/video/generate-async', rateLimit, apiKeyAuth, async (req, res)
             task.otherFilePath = null;
             task.downloadUrl = `/api/v1/video/cache/${cacheKey}.${result.ext}`;
             task.status = 'completed';
-            
-            // AUTO UPDATE SESSIONS FILE
-            if (sessionId && msgId) {
-                await updateSessionTaskResult(sessionId, msgId, task.downloadUrl);
-            }
 
             if (task.sseResponse) {
 
@@ -1691,130 +1636,6 @@ app.get('/api/v1/video/download/:taskId', async (req, res) => {
 });
 
 /**
- * API Keys Admin Panel Routes
- */
-app.get('/admin/keys', async (req, res) => {
-    const keys = await getAllKeys();
-    
-    // Simple HTML UI for admin panel
-    const html = `
-    <!DOCTYPE html>
-    <html lang="ru">
-    <head>
-        <meta charset="UTF-8">
-        <title>Управление API Ключами</title>
-        <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f3f4f6; color: #1f2937; padding: 40px; }
-            .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-            h1 { margin-top: 0; color: #111827; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { text-align: left; padding: 12px; border-bottom: 1px solid #e5e7eb; }
-            th { background: #f9fafb; font-weight: 600; }
-            .badge { background: #e0e7ff; color: #4f46e5; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-family: monospace; }
-            .btn { background: #4f46e5; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; text-decoration: none; display: inline-block; }
-            .btn-danger { background: #ef4444; }
-            .form-group { margin-bottom: 20px; display: flex; gap: 10px; }
-            input[type="text"] { flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>Управление API Ключами</h1>
-            <p>Укажите домен сайта (например, <code>example.kz</code>). Для всех доменов используйте <code>*</code>.</p>
-            
-            <form id="createForm" class="form-group" onsubmit="createKey(event)">
-                <input type="text" id="domain" placeholder="Домен (например: example.kz)" required>
-                <button type="submit" class="btn">Сгенерировать ключ</button>
-            </form>
-
-            <table>
-                <thead>
-                    <tr>
-                        <th>Домен (Origin/Referer)</th>
-                        <th>API Ключ</th>
-                        <th>Создан</th>
-                        <th>Действия</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${keys.map(k => `
-                        <tr>
-                            <td><strong>${k.domain}</strong></td>
-                            <td><span class="badge">${k.apiKey}</span></td>
-                            <td>${new Date(k.createdAt).toLocaleDateString()}</td>
-                            <td><button onclick="deleteKey('${k.id}')" class="btn btn-danger">Удалить</button></td>
-                        </tr>
-                    `).join('')}
-                    ${keys.length === 0 ? '<tr><td colspan="4" style="text-align:center; color:#6b7280;">Ключей пока нет</td></tr>' : ''}
-                </tbody>
-            </table>
-        </div>
-
-        <script>
-            async function createKey(e) {
-                e.preventDefault();
-                const domain = document.getElementById('domain').value;
-                try {
-                    const res = await fetch('/admin/api/keys', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ domain })
-                    });
-                    if (res.ok) window.location.reload();
-                    else {
-                        const text = await res.text();
-                        alert('Ошибка ' + res.status + ': ' + text);
-                    }
-                } catch (err) {
-                    alert('Сетевая ошибка: ' + err.message);
-                }
-            }
-
-            async function deleteKey(id) {
-                if (!confirm('Точно удалить ключ? Виджет на этом домене перестанет работать.')) return;
-                try {
-                    const res = await fetch('/admin/api/keys/' + id, { method: 'DELETE' });
-                    if (res.ok) window.location.reload();
-                    else {
-                        const text = await res.text();
-                        alert('Ошибка ' + res.status + ': ' + text);
-                    }
-                } catch (err) {
-                    alert('Сетевая ошибка: ' + err.message);
-                }
-            }
-        </script>
-    </body>
-    </html>`;
-    
-    res.send(html);
-});
-
-app.post('/admin/api/keys', async (req, res) => {
-    console.log('[Admin] POST /admin/api/keys called, body:', JSON.stringify(req.body));
-    try {
-        const key = await createKey(req.body.domain);
-        console.log('[Admin] Key created successfully:', key.id, 'for domain:', key.domain);
-        res.json(key);
-    } catch (err) {
-        console.error('[Admin] ERROR creating key:', err.message, err.stack);
-        res.status(500).json({ error: 'Failed to create key: ' + err.message });
-    }
-});
-
-app.delete('/admin/api/keys/:id', async (req, res) => {
-    console.log('[Admin] DELETE /admin/api/keys/' + req.params.id);
-    try {
-        const success = await deleteKey(req.params.id);
-        if (success) res.json({ success: true });
-        else res.status(404).json({ error: 'Key not found' });
-    } catch (err) {
-        console.error('[Admin] ERROR deleting key:', err.message, err.stack);
-        res.status(500).json({ error: 'Failed to delete key: ' + err.message });
-    }
-});
-
-/**
  * Avatar mirror management.
  *
  * A sync never goes live on trust: the freshly downloaded build is vetted by a
@@ -1896,8 +1717,8 @@ async function refreshAvatarMirror({ force = false, skipSmokeTest = false } = {}
 }
 
 /**
- * The admin surface manages API keys and can roll the avatar mirror back, so it
- * must not be reachable from the internet. Loopback is always allowed (SSH in,
+ * The admin surface can re-sync and roll the avatar mirror back, so it must not
+ * be reachable from the internet. Loopback is always allowed (SSH in,
  * or tunnel the port); anything else needs ADMIN_TOKEN. nginx no longer proxies
  * /admin/ at all, so this is defence in depth rather than the only lock.
  */
@@ -1942,168 +1763,6 @@ app.post('/admin/avatar/rollback', (req, res) => {
         res.status(409).json({ error: err.message });
     }
 });
-
-/**
- * Chat Session Persistence API (Shared)
- */
-async function getSessionsFromDisk() {
-    try {
-        const data = await fs.promises.readFile(SESSIONS_FILE, 'utf8');
-        return JSON.parse(data);
-    } catch (e) {
-        // Try backup if main file is corrupted
-        const backupPath = SESSIONS_FILE + '.bak';
-        try {
-            const backupData = await fs.promises.readFile(backupPath, 'utf8');
-            console.warn('[Storage] Main sessions.json corrupted, restored from backup');
-            return JSON.parse(backupData);
-        } catch (e2) {
-            return [];
-        }
-    }
-}
-
-const MAX_SESSIONS = 1000;
-const MAX_MESSAGES_PER_SESSION = 500;
-const MAX_TITLE_LENGTH = 100;
-const MAX_GLOSS_PREVIEW_LENGTH = 2000;
-const MAX_GLOSS_TOKENS = 200;
-
-function validateAndCapSessions(sessions) {
-    if (!Array.isArray(sessions)) return [];
-    const allowedGlossTokenKinds = new Set(['matched', 'dactyl', 'partial-dactyl', 'missing']);
-    return sessions.slice(0, MAX_SESSIONS).map(s => {
-        if (!s || typeof s !== 'object' || typeof s.id !== 'string') return null;
-        return {
-            id: s.id.slice(0, 60),
-            title: (typeof s.title === 'string' ? s.title : '').slice(0, MAX_TITLE_LENGTH),
-            messages: Array.isArray(s.messages)
-                ? s.messages.slice(-MAX_MESSAGES_PER_SESSION).map(m => {
-                    if (!m || typeof m !== 'object') return null;
-                    return {
-                        role: m.role === 'user' || m.role === 'assistant' ? m.role : 'user',
-                        content: typeof m.content === 'string' ? m.content.slice(0, 2000) : undefined,
-                        msgId: typeof m.msgId === 'string' ? m.msgId.slice(0, 60) : undefined,
-                        glosses: typeof m.glosses === 'string' ? m.glosses.slice(0, 2000) : undefined,
-                        glossPreview: typeof m.glossPreview === 'string' ? m.glossPreview.slice(0, MAX_GLOSS_PREVIEW_LENGTH) : undefined,
-                        glossTokens: Array.isArray(m.glossTokens)
-                            ? m.glossTokens.slice(0, MAX_GLOSS_TOKENS).map(t => {
-                                if (!t || typeof t !== 'object') return null;
-                                return {
-                                    original: typeof t.original === 'string' ? t.original.slice(0, 100) : '',
-                                    gloss: typeof t.gloss === 'string' ? t.gloss.slice(0, 100) : '',
-                                    kind: typeof t.kind === 'string' && allowedGlossTokenKinds.has(t.kind) ? t.kind : undefined,
-                                    matched: typeof t.matched === 'boolean' ? t.matched : false,
-                                };
-                            }).filter(Boolean)
-                            : undefined,
-                        videoUrl: typeof m.videoUrl === 'string' ? m.videoUrl.slice(0, 500) : undefined,
-                        taskId: typeof m.taskId === 'string' ? m.taskId.slice(0, 60) : m.taskId === null ? null : undefined,
-                        bgColor: typeof m.bgColor === 'string' ? m.bgColor.slice(0, 30) : undefined,
-                        avatar: typeof m.avatar === 'string' ? m.avatar.slice(0, 50) : undefined,
-                        mode: typeof m.mode === 'string' ? m.mode.slice(0, 20) : undefined,
-                        error: typeof m.error === 'string' ? m.error.slice(0, 500) : undefined,
-                        timestamp: typeof m.timestamp === 'number' ? m.timestamp : undefined,
-                    };
-                }).filter(Boolean)
-                : []
-        };
-    }).filter(Boolean);
-}
-
-async function atomicWriteFile(filePath, data) {
-    const tmpPath = filePath + '.tmp';
-    const backupPath = filePath + '.bak';
-    await fs.promises.writeFile(tmpPath, data);
-    // Create backup of current file
-    try { await fs.promises.copyFile(filePath, backupPath); } catch(e) { /* first write, no backup needed */ }
-    // Use copyFile + unlink instead of rename — rename fails on Docker bind mounts (EBUSY)
-    try {
-        await fs.promises.rename(tmpPath, filePath);
-    } catch(renameErr) {
-        if (renameErr.code === 'EBUSY' || renameErr.code === 'EXDEV') {
-            await fs.promises.copyFile(tmpPath, filePath);
-            await fs.promises.unlink(tmpPath).catch(() => {});
-        } else {
-            throw renameErr;
-        }
-    }
-}
-
-let _writeQueue = Promise.resolve();
-async function safeWriteSessions(incomingSessions) {
-    _writeQueue = _writeQueue.then(async () => {
-        // Validate and cap incoming data
-        const validated = validateAndCapSessions(incomingSessions);
-        
-        // Merge: preserve videoUrl set by background tasks that client may not know about
-        try {
-            const diskData = await fs.promises.readFile(SESSIONS_FILE, 'utf8');
-            const diskSessions = JSON.parse(diskData);
-            for (const diskSession of diskSessions) {
-                const incoming = validated.find(s => s.id === diskSession.id);
-                if (incoming) {
-                    for (const diskMsg of (diskSession.messages || [])) {
-                        if (diskMsg.videoUrl && diskMsg.msgId) {
-                            const incomingMsg = incoming.messages.find(m => m.msgId === diskMsg.msgId);
-                            if (incomingMsg && !incomingMsg.videoUrl) {
-                                incomingMsg.videoUrl = diskMsg.videoUrl;
-                                incomingMsg.timestamp = diskMsg.timestamp;
-                                incomingMsg.taskId = null;
-                            }
-                        }
-                    }
-                }
-            }
-        } catch(e) {
-            console.warn('[Storage] Merge skipped (disk read failed):', e.message);
-        }
-        await atomicWriteFile(SESSIONS_FILE, JSON.stringify(validated, null, 2));
-    }).catch(e => console.error('[Storage] Write error:', e));
-    return _writeQueue;
-}
-
-// Atomic update for tasks
-async function updateSessionTaskResult(sessionId, msgId, videoUrl) {
-    _writeQueue = _writeQueue.then(async () => {
-        const data = await fs.promises.readFile(SESSIONS_FILE, 'utf8');
-        const sessions = data ? JSON.parse(data) : [];
-        
-        const session = sessions.find(s => s.id === sessionId);
-        if (session) {
-            const msg = session.messages.find(m => m.msgId === msgId);
-            if (msg) {
-                msg.videoUrl = videoUrl;
-                msg.timestamp = Date.now();
-                msg.taskId = null;
-                await atomicWriteFile(SESSIONS_FILE, JSON.stringify(sessions, null, 2));
-                console.log(`[Storage] Auto-updated message ${msgId} with video result.`);
-            }
-        }
-    }).catch(e => console.error('[Storage] Auto-update error:', e));
-    return _writeQueue;
-}
-
-
-app.get('/api/v1/sessions', async (req, res) => {
-    const sessions = await getSessionsFromDisk();
-    res.json(sessions);
-});
-
-app.post('/api/v1/sessions', async (req, res) => {
-    try {
-        const sessions = req.body;
-        if (!Array.isArray(sessions)) {
-            return res.status(400).json({ error: 'Data must be an array' });
-        }
-        await safeWriteSessions(sessions);
-        res.json({ status: 'ok' });
-    } catch (e) {
-        console.error('[Server] Error saving sessions:', e);
-        res.status(500).json({ error: e.message });
-    }
-});
-
 
 // Periodic cleanup: keep TEMP_DIR under the cap (LRU)
 //
@@ -2176,6 +1835,10 @@ app.listen(port, '0.0.0.0', () => {
     if (!AVATAR_API_KEY) {
         console.error('[Server] ⚠️  AVATAR_API_KEY is empty — every gesture lookup will return 401 and');
         console.error('[Server]     videos will come out with moving lips and no signing. Set it in .env.');
+    }
+    if (!apiGuard.configured) {
+        console.error('[Server] ⚠️  GENERATOR_API_KEYS is empty — every /api/v1/video request will get 401.');
+        console.error('[Server]     Set it in .env (the same value the portal sends as X-API-Key).');
     }
     bootstrapAvatarMirror();
 });

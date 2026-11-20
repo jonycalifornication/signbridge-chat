@@ -26,15 +26,15 @@ server {
   listen 80;
   server_name _;
 
-  root /usr/share/nginx/html;
-  index index.html;
-
-  # SPA routing (чтобы перезагрузка страниц не давала 404)
+  # Страницы у генератора нет: наружу отдаётся только API видео ниже, всё
+  # остальное — 404. Ключ (X-API-Key) проверяют воркеры, а не nginx: так
+  # проверка одна и та же и снаружи, и между воркерами.
+  default_type application/json;
   location / {
-    try_files $uri $uri/ /index.html;
+    return 404 '{"error":"not_found"}';
   }
 
-  # --- Renderer endpoints (video generation + sessions) ---
+  # --- Renderer endpoints (video generation) ---
 
   # Статус, скачивание и отмена — строго тому воркеру, который задачу начал.
   # resolver нужен потому, что адрес берётся из переменной: без него nginx
@@ -83,24 +83,13 @@ server {
     proxy_send_timeout 1200;
   }
 
-  location /api/v1/sessions {
-    proxy_pass ${RENDERER_URL};
-    proxy_http_version 1.1;
+  # No proxy to the avatar or the storage backend: translate/file traffic is
+  # issued server-side (render plan) or inside the render page, which is served
+  # by the renderer itself — so nothing avatar-related is reachable from the
+  # internet through this vhost.
 
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
-
-  # No browser-facing proxy to the avatar or the storage backend: the video
-  # generator UI only calls our own renderer. Translate/file traffic is issued
-  # server-side (render plan) or inside the render page, which is served by the
-  # renderer itself — so nothing avatar-related is reachable from the internet
-  # through this vhost.
-
-  # Админка (ключи + управление зеркалом аватара) наружу НЕ выставляется.
-  # Доступ только с самого сервера: ssh -L 3003:127.0.0.1:3003 и открыть
-  # http://localhost:3003/admin/keys
+  # Админка (управление зеркалом аватара) наружу НЕ выставляется. Доступ
+  # только с самого сервера: ssh -L 3003:127.0.0.1:3003, затем
+  # curl localhost:3003/admin/avatar/status
 
 }

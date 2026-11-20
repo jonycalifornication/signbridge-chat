@@ -11,12 +11,11 @@
 ## Как это устроено
 
 ```
-Браузер ──► nginx (порт 5173) ──► index.html = видеогенератор
-              │
-              ├─ /api/v1/video/*   ─┐
-              ├─ /api/v1/sessions  ─┼─► рендерер (Node, порт 3003)
-              └─ /admin/*          ─┘        │
-                                             │  puppeteer + WebGL на GPU
+Портал (бэкенд, X-API-Key) ──► nginx (порт 5173) ── /api/v1/video/* ──► рендереры
+                                 остальное → 404                     (Node, :3003,
+                                                                      по одному на GPU)
+                                                                             │
+                                                                             │  puppeteer + WebGL на GPU
                                              │
                                              ├─► ЗЕРКАЛО аватара (локально)
                                              │   /avatar/current/embed.html
@@ -35,6 +34,22 @@
 сервису t2g внутри `/translate/`. Вся логика видео
 (виртуальное время, захват кадров, кодирование) остаётся здесь.
 Наследования от кода аватара нет — только вызовы его API.
+
+### Доступ
+
+Своей страницы у генератора нет: единственный клиент — бэкенд портала
+(`speech_to_avatar`). Весь `/api/v1/video/*`, включая готовые файлы кэша,
+пускает только с заголовком `X-API-Key` из `GENERATOR_API_KEYS`
+(`src/server/api-auth.js`):
+
+* верный ключ — без ограничения частоты: у портала свои квоты, а все его
+  пользователи приходят сюда с одного адреса;
+* без ключа — `401`, после 10 попыток в минуту с одного адреса — `429`.
+  Адрес берётся из `X-Forwarded-For` ровно через два прокси (nginx на
+  signbridge1 и наш nginx);
+* ключей не задано — отказ всем, а compose без них не запускается;
+* воркеры ходят друг к другу с тем же ключом: передают задачу свободной карте
+  и пересылают опрос чужой задачи её владельцу.
 
 ### Зеркало аватара
 
@@ -61,7 +76,7 @@ curl localhost:3003/admin/avatar/status            # что сейчас жив�
 ## Запуск
 
 ```bash
-cp .env.example .env    # заполнить AVATAR_API_KEY
+cp .env.example .env    # заполнить AVATAR_API_KEY и GENERATOR_API_KEYS
 docker compose up -d --build
 ```
 
@@ -76,8 +91,9 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 ```bash
 npm install
 npm run avatar:sync     # положить аватара в зеркало
-npm run server          # рендерер на :3003
-npm run dev             # UI на :5173
+GENERATOR_API_KEYS=dev-key npm run server   # рендерер на :3003
+curl -H 'X-API-Key: dev-key' -H 'content-type: application/json' \
+     -d '{"glosses":"алақан"}' localhost:3003/api/v1/video/generate-async
 ```
 
 ## Переменные окружения
@@ -86,6 +102,7 @@ npm run dev             # UI на :5173
 |---|---|
 | `AVATAR_URL` | откуда берётся сборка аватара. Читается **только** при синхронизации зеркала |
 | `AVATAR_API_KEY` | наш клиентский ключ для gateway аватара. Расход считается по ключу — нужен свой, не мастер-ключ виджета |
+| `GENERATOR_API_KEYS` | ключи, с которыми пускаем в API видео (`X-API-Key`), через запятую. Тот же, что у портала в `AVATAR_MP4_GENERATOR_API_KEY`. Обязателен |
 | `AVATAR_FILES_URL` | хранилище, откуда качаются VRMA. Напрямую, минуя продуктовый сервер |
 | `AVATAR_SYNC_INTERVAL_MS` | автообновление зеркала; пусто = только вручную |
 | `RENDER_PLAN_LANGUAGE_ID` | код языка. Бэкенд знает `KSL`, `RSL`, `ASl` — не `kz_KSL` |
@@ -95,8 +112,9 @@ npm run dev             # UI на :5173
 
 | Путь | Что это |
 |---|---|
-| `index.html`, `src/video-generator/` | UI видеогенератора, он же корень сайта |
-| `src/server/index.js` | рендерер: очередь, puppeteer, кэш, ключи, сессии |
+| `nginx.conf.template`, `Dockerfile` | входной nginx: раздаёт `/api/v1/video/*` по воркерам |
+| `src/server/index.js` | рендерер: очередь, puppeteer, кэш, передача задач между воркерами |
+| `src/server/api-auth.js` | проверка `X-API-Key` и лимит для запросов без ключа |
 | `src/server/avatar-mirror.js` | скачивание, проверка и переключение зеркала аватара |
 | `src/headless/inject-renderer.js` | то, что внедряется в страницу аватара. Без импортов, без сборки |
 | `src/headless/render-plan.js` | один запрос в gateway + предпросмотр глосс и оценка таймаута |
@@ -104,11 +122,14 @@ npm run dev             # UI на :5173
 
 ## API рендерера
 
+Все пути — только с `X-API-Key` (см. «Доступ»).
+
 | Метод | Путь | Что делает |
 |---|---|---|
-| `POST` | `/api/v1/video/generate` | синхронно, отдаёт webm телом ответа |
+| `POST` | `/api/v1/video/generate` | синхронно, отдаёт видео телом ответа |
 | `POST` | `/api/v1/video/generate-async` | ставит задачу, возвращает `taskId` |
 | `GET` | `/api/v1/video/status/:taskId` | SSE с прогрессом |
 | `GET` | `/api/v1/video/download/:taskId` | готовый файл |
+| `POST` | `/api/v1/video/cancel/:taskId` | остановить рендер |
 | `POST` | `/api/v1/video/preview` | только предпросмотр глосс, без рендера |
-| `GET/POST` | `/api/v1/sessions` | история чатов |
+| `GET` | `/api/v1/video/cache/<файл>` | готовый файл из общего кэша |
